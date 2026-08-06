@@ -55,13 +55,47 @@ def test_reference_villa_known_group_address():
     assert ga.security == "Auto"
 
 
-def test_reference_villa_communication_objects_reference_real_devices():
+def test_reference_villa_all_communication_objects_resolve_to_a_real_device():
+    """Some Datapoints aren't grouped under any Channel in the export; the
+    id-prefix fallback must still resolve every one of them to a device."""
     project = JsonLdImporter().import_project(REFERENCE_VILLA)
     device_ids = {device.id for device in project.devices}
 
-    linked = [co for co in project.communication_objects if co.device_id is not None]
-    assert linked, "expected at least one communication object linked to a device"
-    assert all(co.device_id in device_ids for co in linked)
+    assert len(project.communication_objects) == 214
+    unresolved = [co.id for co in project.communication_objects if co.device_id is None]
+    assert unresolved == []
+    assert all(co.device_id in device_ids for co in project.communication_objects)
+
+
+def test_reference_villa_device_communication_object_ids_partition_all_objects():
+    project = JsonLdImporter().import_project(REFERENCE_VILLA)
+
+    all_ids_via_devices = [
+        co_id for device in project.devices for co_id in device.communication_object_ids
+    ]
+    assert len(all_ids_via_devices) == 214
+    assert len(set(all_ids_via_devices)) == 214, "no comm. object should belong to two devices"
+
+
+def test_reference_villa_installation_metadata():
+    project = JsonLdImporter().import_project(REFERENCE_VILLA)
+
+    # The raw macVersion string contains mojibake in the source export itself
+    # (an ETS encoding issue, not a parsing bug) - only the prefix is stable.
+    assert project.tool_version is not None
+    assert project.tool_version.startswith("ETS 6.4.1")
+    assert project.installation_state == "Tested"
+
+
+def test_reference_villa_device_product_metadata():
+    project = JsonLdImporter().import_project(REFERENCE_VILLA)
+    by_individual_address = {d.individual_address: d for d in project.devices}
+
+    device = by_individual_address["1.1.2"]
+    assert device.manufacturer == "GVS"
+    assert device.product_name == "Multifunctional Actuator with Secure, 8-Fold"
+    assert device.order_number == "AMMA-08/10.S"
+    assert device.serial_number == "$008559070149"
 
 
 def test_reference_villa_group_addresses_reference_real_communication_objects():

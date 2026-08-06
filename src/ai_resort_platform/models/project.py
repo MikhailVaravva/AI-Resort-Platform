@@ -23,6 +23,8 @@ class CommunicationObject:
     id: str
     name: str
     device_id: str | None = None
+    channel_id: str | None = None
+    channel_name: str | None = None
     flags: str | None = None
     datapoint_type: str | None = None
     readable: bool = False
@@ -31,7 +33,14 @@ class CommunicationObject:
 
 @dataclass(frozen=True, slots=True)
 class Device:
-    """A physical KNX device."""
+    """A physical KNX device.
+
+    `parameters` holds configured ETS application-program parameter values.
+    The JSON-LD semantic export does not expose these (verified: no
+    parameter-shaped property exists anywhere in its schema) - it is always
+    empty when populated by JsonLdImporter, and exists so a future .knxproj
+    supplementary importer can fill it in without changing this model.
+    """
 
     id: str
     name: str
@@ -39,7 +48,9 @@ class Device:
     serial_number: str | None = None
     manufacturer: str | None = None
     product_name: str | None = None
+    order_number: str | None = None
     communication_object_ids: tuple[str, ...] = field(default_factory=tuple)
+    parameters: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +74,8 @@ class ProjectModel:
     """
 
     project_name: str
+    tool_version: str | None = None
+    installation_state: str | None = None
     rooms: tuple[Room, ...] = field(default_factory=tuple)
     devices: tuple[Device, ...] = field(default_factory=tuple)
     group_addresses: tuple[GroupAddress, ...] = field(default_factory=tuple)

@@ -7,6 +7,14 @@
     "mac": "http://schema.knx.org/2023/mac#"
   },
   "@graph": [
+    {
+      "@id": "prj:INST-1",
+      "@type": ["core:Installation", "owl:NamedIndividual"],
+      "dct:title": "Test Site",
+      "knx:macVersion": "ETS 6.4.1 (Build 8718)",
+      "core:state": "Tested",
+      "core:containsAsset": [{ "@id": "prj:DI-1" }]
+    },
     { "@id": "prj:B-1", "@type": ["loc:Building", "owl:NamedIndividual"], "dct:title": "Test Site" },
     { "@id": "prj:SP-1", "@type": ["loc:Space", "owl:NamedIndividual"], "dct:title": "Villa X", "loc:hasFloor": { "@id": "prj:FL-1" } },
     { "@id": "prj:FL-1", "@type": ["loc:Floor", "owl:NamedIndividual"], "dct:title": "1", "loc:hasRoom": { "@id": "prj:RM-1" } },
@@ -22,8 +30,18 @@
       "core:hasProduct": { "@id": "prj:PR-1" }
     },
     { "@id": "prj:AP-1", "@type": ["core:ApplicationProgram", "owl:NamedIndividual"], "core:manufacturer": "Test Manufacturer" },
-    { "@id": "prj:PR-1", "@type": ["core:Product", "owl:NamedIndividual"], "dct:title": "Test Actuator Product" },
-    { "@id": "prj:CH-1", "@type": ["knx:Channel", "owl:NamedIndividual"], "core:hasPoint": [{ "@id": "prj:CO-1" }] },
+    {
+      "@id": "prj:PR-1",
+      "@type": ["core:Product", "owl:NamedIndividual"],
+      "dct:title": "Test Actuator Product",
+      "core:orderNumber": "TA-001"
+    },
+    {
+      "@id": "prj:CH-1",
+      "@type": ["knx:Channel", "owl:NamedIndividual"],
+      "dct:title": "1 Bit",
+      "core:hasPoint": [{ "@id": "prj:CO-1" }]
+    },
     {
       "@id": "prj:CO-1",
       "@type": ["core:Datapoint", "owl:NamedIndividual"],
@@ -31,6 +49,15 @@
       "mac:configFlags": "CWTU",
       "core:readable": { "@value": "False", "@type": "xsd:boolean" },
       "core:writable": { "@value": "True", "@type": "xsd:boolean" },
+      "knx:datapointType": { "@id": "knx:switch" }
+    },
+    {
+      "@id": "prj:DI-1_unlinked_O-9",
+      "@type": ["core:Datapoint", "owl:NamedIndividual"],
+      "dct:title": "Output 2 (not grouped under any Channel)",
+      "mac:configFlags": "CWTU",
+      "core:readable": { "@value": "True", "@type": "xsd:boolean" },
+      "core:writable": { "@value": "False", "@type": "xsd:boolean" },
       "knx:datapointType": { "@id": "knx:switch" }
     },
     {

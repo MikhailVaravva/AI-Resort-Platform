@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-resort-platform"
+version = "0.1.0"
+description = "Reference Villa -> Digital Twin -> Clone Engine -> Deployment for a KNX villa resort."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "black>=24",
+    "mypy>=1.11",
+]
+
+[project.scripts]
+ai-resort-platform = "ai_resort_platform.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# This repo root also holds unrelated projects/infrastructure
+# (ai-resort-generator/, homeassistant/, grafana/, ...) - scope to our own tree.
+extend-exclude = [
+    "ai-resort-generator",
+    "homeassistant",
+    "grafana",
+    "influxdb",
+    "mosquitto",
+    "nodered",
+    "ollama",
+    "openwebui",
+    "postgres",
+    "backups",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+extend-exclude = "/(ai-resort-generator|homeassistant|grafana|influxdb|mosquitto|nodered|ollama|openwebui|postgres|backups)/"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

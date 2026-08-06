@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.pyc
+*.py[cod]
+*.pyo
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+
+# Build
+dist/
+build/
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+
+# Archives
+*.tar.gz
+*.zip
+
+# Backups
+backups/
+
+# Databases
+influxdb/data/
+postgres/data/
+grafana/data/
+
+# Ollama models (очень большие)
+ollama/models/
+
+# Home Assistant runtime
+homeassistant/.storage/
+
+# Node-RED runtime
+nodered/node_modules/
+
+# IDE
+.vscode/
+.idea/
+
+# Linux
+.DS_Store

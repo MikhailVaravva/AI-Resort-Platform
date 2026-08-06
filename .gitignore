@@ -48,3 +48,8 @@ nodered/node_modules/
 
 # Linux
 .DS_Store
+
+# AI Resort Platform: scratch area for exchanging/vetting candidate ETS
+# project exports (may contain unprotected copies, real device identifiers).
+# Only the one vetted fixture in examples/Reference-Villa/ is git-tracked.
+/reference/

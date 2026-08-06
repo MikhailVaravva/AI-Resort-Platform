@@ -1,0 +1,49 @@
+{
+  "@context": {
+    "core": "http://schema.knx.org/2023/en50090-6-2/core#",
+    "knx": "http://schema.knx.org/2020/ontology/knx#",
+    "loc": "http://schema.knx.org/2023/loc#",
+    "dct": "http://purl.org/dc/terms/",
+    "mac": "http://schema.knx.org/2023/mac#"
+  },
+  "@graph": [
+    { "@id": "prj:B-1", "@type": ["loc:Building", "owl:NamedIndividual"], "dct:title": "Test Site" },
+    { "@id": "prj:SP-1", "@type": ["loc:Space", "owl:NamedIndividual"], "dct:title": "Villa X", "loc:hasFloor": { "@id": "prj:FL-1" } },
+    { "@id": "prj:FL-1", "@type": ["loc:Floor", "owl:NamedIndividual"], "dct:title": "1", "loc:hasRoom": { "@id": "prj:RM-1" } },
+    { "@id": "prj:RM-1", "@type": ["loc:Room", "owl:NamedIndividual"], "dct:title": "Villa X1", "loc:containsEquipment": [{ "@id": "prj:DI-1" }] },
+    {
+      "@id": "prj:DI-1",
+      "@type": ["core:Device", "owl:NamedIndividual"],
+      "dct:title": "Test Actuator",
+      "knx:individualAddress": { "@value": "1101", "@type": "xsd:unsignedShort" },
+      "core:serialNumber": "0012345",
+      "knx:hasChannel": [{ "@id": "prj:CH-1" }],
+      "core:hosts": { "@id": "prj:AP-1" },
+      "core:hasProduct": { "@id": "prj:PR-1" }
+    },
+    { "@id": "prj:AP-1", "@type": ["core:ApplicationProgram", "owl:NamedIndividual"], "core:manufacturer": "Test Manufacturer" },
+    { "@id": "prj:PR-1", "@type": ["core:Product", "owl:NamedIndividual"], "dct:title": "Test Actuator Product" },
+    { "@id": "prj:CH-1", "@type": ["knx:Channel", "owl:NamedIndividual"], "core:hasPoint": [{ "@id": "prj:CO-1" }] },
+    {
+      "@id": "prj:CO-1",
+      "@type": ["core:Datapoint", "owl:NamedIndividual"],
+      "dct:title": "Output 1",
+      "mac:configFlags": "CWTU",
+      "core:readable": { "@value": "False", "@type": "xsd:boolean" },
+      "core:writable": { "@value": "True", "@type": "xsd:boolean" },
+      "knx:datapointType": { "@id": "knx:switch" }
+    },
+    {
+      "@id": "prj:GA-1",
+      "@type": ["knx:FunctionPoint", "owl:NamedIndividual"],
+      "dct:title": "X1 Light on/off",
+      "dct:description": "Test light",
+      "knx:groupAddress": { "@value": "2304", "@type": "xsd:positiveInteger" },
+      "knx:securityMode": "Auto",
+      "core:readable": { "@value": "False", "@type": "xsd:boolean" },
+      "core:writable": { "@value": "True", "@type": "xsd:boolean" },
+      "knx:datapointType": { "@id": "knx:switch" },
+      "core:groups": [{ "@id": "prj:CO-1" }]
+    }
+  ]
+}

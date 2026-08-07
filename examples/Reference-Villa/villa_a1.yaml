@@ -1,162 +1,123 @@
-cover:
-- name: Curtain
-  unique_id: villa_a1_curtain
-  move_long_address: 1/1/30
-  stop_address: 1/1/31
-  position_address: 1/1/32
-  position_state_address: 1/1/33
-light:
-- name: G1
-  unique_id: villa_a1_g1
-  address: 1/1/0
-  state_address: 1/1/1
-  color_temperature_address: 1/1/4
-  color_temperature_state_address: 1/1/5
-  brightness_address: 1/1/2
-  brightness_state_address: 1/1/3
-- name: G2
-  unique_id: villa_a1_g2
-  address: 1/1/10
-  state_address: 1/1/11
-  brightness_address: 1/1/12
-  brightness_state_address: 1/1/13
-- name: DMX Stone Red
-  unique_id: villa_a1_dmx_stone_red
-  brightness_address: 1/1/100
-- name: DMX Stone Green
-  unique_id: villa_a1_dmx_stone_green
-  brightness_address: 1/1/102
-- name: DMX Stone Blue
-  unique_id: villa_a1_dmx_stone_blue
-  brightness_address: 1/1/104
-- name: DMX Stone White
-  unique_id: villa_a1_dmx_stone_white
-  brightness_address: 1/1/106
-- name: DMX Terrace Red
-  unique_id: villa_a1_dmx_terrace_red
-  brightness_address: 1/1/160
-  brightness_state_address: 1/1/161
-- name: DMX Terrace Green
-  unique_id: villa_a1_dmx_terrace_green
-  brightness_address: 1/1/162
-  brightness_state_address: 1/1/163
-- name: DMX Terrace Blue
-  unique_id: villa_a1_dmx_terrace_blue
-  brightness_address: 1/1/164
-  brightness_state_address: 1/1/165
-- name: DMX Terrace White
-  unique_id: villa_a1_dmx_terrace_white
-  brightness_address: 1/1/166
-  brightness_state_address: 1/1/167
-- name: DMX Terrace Dimming
-  unique_id: villa_a1_dmx_terrace_dimming
-  brightness_address: 1/1/170
-- name: Audio Absolut volume
-  unique_id: villa_a1_audio_absolut_volume
-  brightness_address: 1/1/211
-- name: Audio Volume
-  unique_id: villa_a1_audio_volume
-  brightness_state_address: 1/1/212
-switch:
-- name: Stone Power
-  unique_id: villa_a1_stone_power
-  address: 1/1/20
-  state_address: 1/1/21
-- name: Terrace Door
-  unique_id: villa_a1_terrace_door
-  address: 1/1/24
-- name: Living room Button
-  unique_id: villa_a1_living_room_button
-  address: 1/1/26
-  state_address: 1/1/27
-- name: Bathroom Button
-  unique_id: villa_a1_bathroom_button
-  address: 1/1/28
-- name: Terrace Door Contact
-  unique_id: villa_a1_terrace_door_contact
-  address: 1/1/29
-- name: Guest
-  unique_id: villa_a1_guest
-  address: 1/1/50
-- name: All Off
-  unique_id: villa_a1_all_off
-  address: 1/1/99
-- name: DMX Terrace On/Off
-  unique_id: villa_a1_dmx_terrace_on_off
-  address: 1/1/168
-- name: Audio Power
-  unique_id: villa_a1_audio_power
-  address: 1/1/202
-  state_address: 1/1/203
-- name: Audio Mute
-  unique_id: villa_a1_audio_mute
-  address: 1/1/220
-  state_address: 1/1/221
-- name: Audio Next/Prev
-  unique_id: villa_a1_audio_next_prev
-  address: 1/1/226
-- name: Audio Power Convert
-  unique_id: villa_a1_audio_power_convert
-  address: 1/1/240
-  state_address: 1/1/241
-sensor:
-- name: Temperature
-  unique_id: villa_a1_temperature_valuetemp
-  type: valueTemp
-  state_address: 1/1/40
-- name: Humidity
-  unique_id: villa_a1_humidity_valuehumidity
-  type: valueHumidity
-  state_address: 1/1/41
-- name: Date
-  unique_id: villa_a1_date_date
-  type: date
-  state_address: 1/1/42
-- name: Audio Play/Pause start
-  unique_id: villa_a1_audio_play_pause_start
-  type: start
-  state_address: 1/1/222
-- name: Audio Play/Pause switch
-  unique_id: villa_a1_audio_play_pause_switch
-  type: switch
-  state_address: 1/1/223
-- name: Audio Track name
-  unique_id: villa_a1_audio_track_name_string88591
-  type: string88591
-  state_address: 1/1/231
-- name: Audio Playlist Select
-  unique_id: villa_a1_audio_playlist_select_major_5_x
-  type: major.5.x
-  state_address: 1/1/239
-- name: Audio Play mode
-  unique_id: villa_a1_audio_play_mode_value1ucount
-  type: value1Ucount
-  state_address: 1/1/243
-scene:
-- name: Scene 1
-  unique_id: villa_a1_scene_1
-  address: 1/1/150
-  scene_number: 1
-- name: Scene 2
-  unique_id: villa_a1_scene_2
-  address: 1/1/150
-  scene_number: 2
-- name: Scene 3
-  unique_id: villa_a1_scene_3
-  address: 1/1/150
-  scene_number: 3
-- name: Scene 4
-  unique_id: villa_a1_scene_4
-  address: 1/1/150
-  scene_number: 4
-- name: Scene 5
-  unique_id: villa_a1_scene_5
-  address: 1/1/150
-  scene_number: 5
-- name: Scene 6
-  unique_id: villa_a1_scene_6
-  address: 1/1/150
-  scene_number: 6
+knx:
+  cover:
+  - name: Curtain
+    move_long_address: 1/1/30
+    stop_address: 1/1/31
+    position_address: 1/1/32
+    position_state_address: 1/1/33
+  light:
+  - name: G1
+    address: 1/1/0
+    state_address: 1/1/1
+    color_temperature_address: 1/1/4
+    color_temperature_state_address: 1/1/5
+    brightness_address: 1/1/2
+    brightness_state_address: 1/1/3
+  - name: G2
+    address: 1/1/10
+    state_address: 1/1/11
+    brightness_address: 1/1/12
+    brightness_state_address: 1/1/13
+  - name: DMX Stone Red
+    brightness_address: 1/1/100
+  - name: DMX Stone Green
+    brightness_address: 1/1/102
+  - name: DMX Stone Blue
+    brightness_address: 1/1/104
+  - name: DMX Stone White
+    brightness_address: 1/1/106
+  - name: DMX Terrace Red
+    brightness_address: 1/1/160
+    brightness_state_address: 1/1/161
+  - name: DMX Terrace Green
+    brightness_address: 1/1/162
+    brightness_state_address: 1/1/163
+  - name: DMX Terrace Blue
+    brightness_address: 1/1/164
+    brightness_state_address: 1/1/165
+  - name: DMX Terrace White
+    brightness_address: 1/1/166
+    brightness_state_address: 1/1/167
+  - name: DMX Terrace Dimming
+    brightness_address: 1/1/170
+  - name: Audio Absolut volume
+    brightness_address: 1/1/211
+  - name: Audio Volume
+    brightness_state_address: 1/1/212
+  switch:
+  - name: Stone Power
+    address: 1/1/20
+    state_address: 1/1/21
+  - name: Terrace Door
+    address: 1/1/24
+  - name: Living room Button
+    address: 1/1/26
+    state_address: 1/1/27
+  - name: Bathroom Button
+    address: 1/1/28
+  - name: Terrace Door Contact
+    address: 1/1/29
+  - name: Guest
+    address: 1/1/50
+  - name: All Off
+    address: 1/1/99
+  - name: DMX Terrace On/Off
+    address: 1/1/168
+  - name: Audio Power
+    address: 1/1/202
+    state_address: 1/1/203
+  - name: Audio Mute
+    address: 1/1/220
+    state_address: 1/1/221
+  - name: Audio Next/Prev
+    address: 1/1/226
+  - name: Audio Power Convert
+    address: 1/1/240
+    state_address: 1/1/241
+  sensor:
+  - name: Temperature
+    type: temperature
+    state_address: 1/1/40
+  - name: Humidity
+    type: humidity
+    state_address: 1/1/41
+  - name: Date
+    type: '11.1'
+    state_address: 1/1/42
+  - name: Audio Play/Pause 1.10
+    type: '1.10'
+    state_address: 1/1/222
+  - name: Audio Play/Pause 1.1
+    type: '1.1'
+    state_address: 1/1/223
+  - name: Audio Track name
+    type: latin_1
+    state_address: 1/1/231
+  - name: Audio Playlist Select
+    type: 1byte_unsigned
+    state_address: 1/1/239
+  - name: Audio Play mode
+    type: pulse
+    state_address: 1/1/243
+  scene:
+  - name: Scene 1
+    address: 1/1/150
+    scene_number: 1
+  - name: Scene 2
+    address: 1/1/150
+    scene_number: 2
+  - name: Scene 3
+    address: 1/1/150
+    scene_number: 3
+  - name: Scene 4
+    address: 1/1/150
+    scene_number: 4
+  - name: Scene 5
+    address: 1/1/150
+    scene_number: 5
+  - name: Scene 6
+    address: 1/1/150
+    scene_number: 6
 script:
   villa_a1_activate_scene_1:
     alias: Activate Scene 1

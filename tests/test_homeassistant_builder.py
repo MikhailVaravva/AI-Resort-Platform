@@ -50,7 +50,7 @@ def test_scaling_dpt_not_used_as_brightness_stays_a_sensor():
 
     assert len(package.entities) == 1
     assert package.entities[0].domain == "sensor"
-    assert package.entities[0].config == {"type": "value1Ucount", "state_address": "1/1/243"}
+    assert package.entities[0].config == {"type": "pulse", "state_address": "1/1/243"}
 
 
 def test_plain_switch_is_not_a_light():
@@ -125,9 +125,13 @@ def test_multi_dpt_non_light_entity_fans_out_to_one_sensor_per_dpt():
     assert len(package.entities) == 2
     assert all(e.domain == "sensor" for e in package.entities)
     ids = {e.unique_id for e in package.entities}
+    # DPT main-type 1 has no valid HA KNX sensor.type at all (see
+    # homeassistant/builder.py:_DPT_LABELS) - both fall back to the numeric
+    # label. These two entities are not valid HA config as `sensor`; fixing
+    # that requires a domain change, out of scope for this grouping test.
     assert ids == {
-        "hot_stone_villa_audio_play_pause_start",
-        "hot_stone_villa_audio_play_pause_switch",
+        "hot_stone_villa_audio_play_pause_1_10",
+        "hot_stone_villa_audio_play_pause_1_1",
     }
 
 

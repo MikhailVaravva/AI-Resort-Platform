@@ -9,27 +9,38 @@ from ai_resort_platform.generators.ha_package import Dashboard, HaEntity, HomeAs
 def package_to_yaml(package: HomeAssistantPackage) -> str:
     """Serialize a HomeAssistantPackage as HA `packages/` YAML.
 
-    All entity domains (light, cover, switch, sensor, binary_sensor) are
-    plain lists; `script` is a mapping keyed by unique_id, per HA's own
-    schema for that domain.
+    Entity domains (light, cover, switch, sensor, binary_sensor) and `scene`
+    (the KNX integration's own scene-recall platform, not HA's core `scene:`
+    component) are all KNX-integration config and must live under a
+    top-level `knx:` key, each as a plain list - that's the current KNX
+    integration YAML schema; the old per-domain top-level keys
+    (`switch:`/`light:`/...) are the pre-2021.12 platform-config schema and
+    are not loaded by a current Home Assistant. `script` is a genuinely
+    separate, core HA integration (calls `scene.turn_on`, not KNX-specific)
+    and stays top-level, as a mapping keyed by unique_id per its own schema.
+
+    `unique_id` is NOT emitted for any KNX entity or scene: verified against
+    the official KNX integration documentation (home-assistant.io/
+    integrations/knx/) - it's not a documented option for any KNX platform
+    (switch/light/sensor/cover/binary_sensor/scene all list only `name`,
+    `default_entity_id`, `entity_category` plus their own address fields).
     """
     data: dict[str, Any] = {}
 
+    knx: dict[str, Any] = {}
     by_domain: dict[str, list[dict[str, Any]]] = {}
     for entity in package.entities:
         by_domain.setdefault(entity.domain, []).append(_entity_dict(entity))
-    data.update(by_domain)
+    knx.update(by_domain)
 
     if package.scenes:
-        data["scene"] = [
-            {
-                "name": scene.name,
-                "unique_id": scene.unique_id,
-                "address": scene.address,
-                "scene_number": scene.scene_number,
-            }
+        knx["scene"] = [
+            {"name": scene.name, "address": scene.address, "scene_number": scene.scene_number}
             for scene in package.scenes
         ]
+
+    if knx:
+        data["knx"] = knx
 
     if package.scripts:
         data["script"] = {
@@ -51,7 +62,7 @@ def package_to_yaml(package: HomeAssistantPackage) -> str:
 
 
 def _entity_dict(entity: HaEntity) -> dict[str, Any]:
-    return {"name": entity.name, "unique_id": entity.unique_id, **entity.config}
+    return {"name": entity.name, **entity.config}
 
 
 def write_package(package: HomeAssistantPackage, path: Path) -> None:

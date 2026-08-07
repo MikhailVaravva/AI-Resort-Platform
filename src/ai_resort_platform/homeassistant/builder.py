@@ -51,28 +51,31 @@ _SCENE_CONTROL_DPT: tuple[int, int | None] = (18, 1)
 _LIGHT_DPTS: set[tuple[int, int | None]] = {(5, 1), (7, 600)}
 _SWITCH_DPT_MAIN = 1
 
-# Old sensor-fallback `type`/unique_id labels, from the JSON-LD builder's
-# `datapoint_type` semantic strings - verified against every real group
-# address in the reference project (ground truth: JsonLdImporter's
-# ProjectModel.group_addresses[*].datapoint_type for reference_villa.jsonld).
-# Kept only for pairs the old builder actually preserved as a sensor;
-# anything not listed here falls back to the numeric "{main}.{sub}" label
-# the new builder already used (there's no old value to preserve for it).
+# Home Assistant KNX `sensor.type` identifiers ("Value types" table,
+# home-assistant.io/integrations/knx/) for the DPTs this builder's sensor
+# fallback actually emits. Verified against that table directly (not
+# guessed, and not xknx's internal DPT names, which don't always match the
+# documented HA option) - anything not listed here falls back to the
+# numeric "{main}.{sub}" label.
+#
+# DPT main-type 1 (switch/enable/step/open_close/start), DPT 11.001 (date),
+# and DPT 18.001 (scene_control) are deliberately NOT here: none of them
+# appear in the documented Value types table at all - HA has no valid
+# `sensor.type` for a DPT-1.x value, and dates/scene-control are handled by
+# their own dedicated platforms (`date:`, and the Scene platform's own
+# `scene_number`/`address`), not `sensor`. The numeric fallback does not
+# fix this for those DPTs either - if a group address with one of these
+# DPTs reaches `_sensor_fallback`, the resulting `type:` is not valid HA
+# config; that can only be fixed by not classifying it as `sensor` at all,
+# which is a domain/entity-selection decision, not a label fix.
 _DPT_LABELS: dict[tuple[int, int | None], str] = {
-    (1, 1): "switch",
-    (1, 3): "enable",
-    (1, 7): "step",
-    (1, 9): "openClose",
-    (1, 10): "start",
-    (5, 1): "scaling",
-    (5, 10): "value1Ucount",
-    (5, None): "major.5.x",
-    (7, 600): "absoluteColourTemperature",
-    (9, 1): "valueTemp",
-    (9, 7): "valueHumidity",
-    (11, 1): "date",
-    (16, 1): "string88591",
-    (18, 1): "sceneControl",
+    (5, 1): "percent",
+    (5, 10): "pulse",
+    (5, None): "1byte_unsigned",
+    (7, 600): "color_temperature",
+    (9, 1): "temperature",
+    (9, 7): "humidity",
+    (16, 1): "latin_1",
 }
 
 _DASHBOARD_SECTIONS = (

@@ -88,7 +88,7 @@ def test_reference_villa_scaling_counter_does_not_become_a_light():
     by_name = {e.name: e for e in package.entities}
 
     assert by_name["Audio Play mode"].domain == "sensor"
-    assert by_name["Audio Play mode"].config["type"] == "value1Ucount"
+    assert by_name["Audio Play mode"].config["type"] == "pulse"
 
 
 def test_reference_villa_dimmable_light_with_colour_temperature():
@@ -113,9 +113,10 @@ def test_reference_villa_package_yaml_round_trips_via_existing_generator():
 
     data = yaml.safe_load(package_to_yaml(package))
 
-    assert set(data.keys()) == {"switch", "light", "sensor", "cover", "scene", "script"}
-    assert len(data["light"]) == 13
-    assert len(data["scene"]) == 6
+    assert set(data.keys()) == {"knx", "script"}
+    assert set(data["knx"].keys()) == {"switch", "light", "sensor", "cover", "scene"}
+    assert len(data["knx"]["light"]) == 13
+    assert len(data["knx"]["scene"]) == 6
     assert len(data["script"]) == 6
 
 
@@ -190,8 +191,8 @@ def test_reference_villa_audio_module_package_excludes_touch_panel_mirrors():
         "villa_a1_audio_mute",
         "villa_a1_audio_play_pause",
         "villa_a1_audio_next_prev",
-        "villa_a1_audio_track_name_string88591",
-        "villa_a1_audio_playlist_select_major_5_x",
+        "villa_a1_audio_track_name_latin_1",
+        "villa_a1_audio_playlist_select_1byte_unsigned",
     }
     assert by_id["villa_a1_audio_power"].config == {
         "address": "1/1/202",
@@ -209,4 +210,5 @@ def test_reference_villa_audio_module_package_yaml_round_trips():
 
     data = yaml.safe_load(package_to_yaml(package))
 
-    assert set(data.keys()) == {"switch", "light", "sensor"}
+    assert set(data.keys()) == {"knx"}
+    assert set(data["knx"].keys()) == {"switch", "light", "sensor"}

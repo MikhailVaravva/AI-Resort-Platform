@@ -49,24 +49,35 @@ def _sample_package() -> HomeAssistantPackage:
     )
 
 
-def test_package_to_yaml_groups_entities_by_domain():
+def test_package_to_yaml_groups_entities_by_domain_under_knx():
+    """Entity domains are KNX-integration config, so they must nest under a
+    top-level `knx:` key - the schema a current Home Assistant actually
+    loads (the old top-level `switch:`/`light:`/... keys are the deprecated
+    pre-2021.12 platform-config schema)."""
     data = yaml.safe_load(package_to_yaml(_sample_package()))
 
-    assert data["light"] == [{"name": "G1", "unique_id": "villa_x1_g1", "address": "1/1/0"}]
-    assert data["switch"] == [{"name": "Stone", "unique_id": "villa_x1_stone", "address": "1/1/20"}]
+    assert data["knx"]["light"] == [{"name": "G1", "address": "1/1/0"}]
+    assert data["knx"]["switch"] == [{"name": "Stone", "address": "1/1/20"}]
 
 
-def test_package_to_yaml_scene_is_a_list():
+def test_package_to_yaml_entities_have_no_unique_id():
+    """`unique_id` is not a documented option for any KNX platform - verified
+    against home-assistant.io/integrations/knx/ (switch/light/sensor/cover/
+    binary_sensor/scene only document `name`, `default_entity_id`,
+    `entity_category` plus their own address fields)."""
     data = yaml.safe_load(package_to_yaml(_sample_package()))
 
-    assert data["scene"] == [
-        {
-            "name": "Scene 1",
-            "unique_id": "villa_x1_scene_1",
-            "address": "1/1/150",
-            "scene_number": 1,
-        }
-    ]
+    assert "unique_id" not in data["knx"]["light"][0]
+    assert "unique_id" not in data["knx"]["switch"][0]
+    assert "unique_id" not in data["knx"]["scene"][0]
+
+
+def test_package_to_yaml_scene_is_a_list_under_knx():
+    """The KNX integration's own scene-recall platform, not HA's core
+    `scene:` component - so it nests under `knx:` too."""
+    data = yaml.safe_load(package_to_yaml(_sample_package()))
+
+    assert data["knx"]["scene"] == [{"name": "Scene 1", "address": "1/1/150", "scene_number": 1}]
 
 
 def test_package_to_yaml_script_is_a_mapping_keyed_by_unique_id():
@@ -98,8 +109,8 @@ def test_write_package_writes_valid_yaml_file(tmp_path):
     write_package(_sample_package(), path)
 
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert "light" in data
-    assert "switch" in data
+    assert "light" in data["knx"]
+    assert "switch" in data["knx"]
 
 
 def test_dashboard_to_yaml_structure():

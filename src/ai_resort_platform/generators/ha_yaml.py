@@ -58,11 +58,14 @@ def package_to_yaml(package: HomeAssistantPackage) -> str:
         data["media_player"] = [_media_player_dict(mp) for mp in package.media_players]
 
     if package.automations:
+        # Plural `triggers`/`actions` - the current official automation
+        # schema (home-assistant.io/docs/automation/yaml/), not the older
+        # singular `trigger`/`action` keys.
         data["automation"] = [
             {
                 "alias": automation.name,
-                "trigger": list(automation.trigger),
-                "action": list(automation.action),
+                "triggers": list(automation.triggers),
+                "actions": list(automation.actions),
             }
             for automation in package.automations
         ]

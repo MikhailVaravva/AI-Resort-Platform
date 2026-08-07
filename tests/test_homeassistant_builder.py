@@ -455,3 +455,80 @@ def test_media_player_is_not_built_when_a_source_entity_is_missing():
     package = build_package(_project(gas))
 
     assert package.media_players == ()
+
+
+def _guest_ga() -> GroupAddress:
+    return GroupAddress(id="8", address="1/1/50", name="A1 Guest", dpt_main=1, dpt_sub=3)
+
+
+def test_welcome_automation_is_built_when_playlists_are_supplied():
+    gas = _audio_module_gas() + (_guest_ga(),)
+    project = _project(gas)
+
+    package = build_package(project, welcome_playlist=1, background_playlist=2)
+
+    assert len(package.automations) == 1
+    automation = package.automations[0]
+    assert automation.unique_id == "hot_stone_villa_welcome"
+    assert automation.name == "Hot Stone VILLA Welcome"
+    assert automation.triggers == ({"trigger": "state", "entity_id": "switch.guest", "to": "on"},)
+    assert automation.actions == (
+        {
+            "action": "media_player.turn_on",
+            "target": {"entity_id": "media_player.hot_stone_villa_audio"},
+        },
+        {
+            "action": "media_player.select_source",
+            "target": {"entity_id": "media_player.hot_stone_villa_audio"},
+            "data": {"source": "1"},
+        },
+        {
+            "action": "media_player.media_play",
+            "target": {"entity_id": "media_player.hot_stone_villa_audio"},
+        },
+        {
+            "action": "media_player.volume_set",
+            "target": {"entity_id": "media_player.hot_stone_villa_audio"},
+            "data": {"volume_level": 0.5},
+        },
+        {"delay": "00:05:00"},
+        {
+            "action": "media_player.select_source",
+            "target": {"entity_id": "media_player.hot_stone_villa_audio"},
+            "data": {"source": "2"},
+        },
+    )
+
+
+def test_welcome_automation_is_not_built_without_both_playlist_indices():
+    gas = _audio_module_gas() + (_guest_ga(),)
+    project = _project(gas)
+
+    assert build_package(project).automations == ()
+    assert build_package(project, welcome_playlist=1).automations == ()
+    assert build_package(project, background_playlist=2).automations == ()
+
+
+def test_welcome_automation_is_not_built_without_a_guest_switch():
+    package = build_package(
+        _project(_audio_module_gas()), welcome_playlist=1, background_playlist=2
+    )
+
+    assert package.automations == ()
+
+
+def test_welcome_automation_respects_custom_volume_and_delay():
+    gas = _audio_module_gas() + (_guest_ga(),)
+    project = _project(gas)
+
+    package = build_package(
+        project,
+        welcome_playlist=1,
+        background_playlist=2,
+        welcome_volume_percent=30,
+        welcome_to_background_delay="00:10:00",
+    )
+
+    automation = package.automations[0]
+    assert automation.actions[3]["data"] == {"volume_level": 0.3}
+    assert automation.actions[4] == {"delay": "00:10:00"}

@@ -23,6 +23,7 @@ from ai_resort_platform.generators.ha_package import (
     Dashboard,
     DashboardCard,
     DashboardView,
+    HaAutomation,
     HaEntity,
     HaMediaPlayer,
     HaScene,
@@ -125,15 +126,40 @@ def _entity_id(entity: HaEntity) -> str:
     return f"{entity.domain}.{_slugify(entity.name)}"
 
 
-def build_package(project: ETSProject) -> HomeAssistantPackage:
+def _media_player_entity_id(media_player: HaMediaPlayer) -> str:
+    """Same reasoning as _entity_id, for the `universal` platform's own
+    `media_player` entity - HA derives entity_id from `name`."""
+    return f"media_player.{_slugify(media_player.name)}"
+
+
+def build_package(
+    project: ETSProject,
+    *,
+    welcome_playlist: int | None = None,
+    background_playlist: int | None = None,
+    welcome_volume_percent: float = 50,
+    welcome_to_background_delay: str = "00:05:00",
+) -> HomeAssistantPackage:
     """Build one HomeAssistantPackage covering every group address in `project`.
 
     unique_ids are scoped to the villa's room name (e.g. "Villa A1"), not the
     whole project name ("Hot Stone VILLA") - matching the old DigitalTwin
     builder, which scoped ids per-villa/per-room. Falls back to the project
     name if the project has no rooms.
+
+    `welcome_playlist`/`background_playlist` opt into the standard
+    check-in automation (see _build_welcome_automation) - omitted by
+    default since there is nothing in ETSProject to derive them from; the
+    automation is simply not built without both.
     """
-    return _build_package(project, project.group_addresses)
+    return _build_package(
+        project,
+        project.group_addresses,
+        welcome_playlist=welcome_playlist,
+        background_playlist=background_playlist,
+        welcome_volume_percent=welcome_volume_percent,
+        welcome_to_background_delay=welcome_to_background_delay,
+    )
 
 
 # The BAB Audio Module device's own name in the reference project - the only
@@ -168,7 +194,13 @@ def build_audio_module_package(project: ETSProject) -> HomeAssistantPackage:
 
 
 def _build_package(
-    project: ETSProject, group_addresses: tuple[GroupAddress, ...]
+    project: ETSProject,
+    group_addresses: tuple[GroupAddress, ...],
+    *,
+    welcome_playlist: int | None = None,
+    background_playlist: int | None = None,
+    welcome_volume_percent: float = 50,
+    welcome_to_background_delay: str = "00:05:00",
 ) -> HomeAssistantPackage:
     villa_name = project.rooms[0].name if project.rooms else project.name
     slug = _slugify(villa_name)
@@ -184,6 +216,16 @@ def _build_package(
 
     entities = list(_apply_audio_module_semantics(tuple(entities)))
     media_player = _build_audio_media_player(slug, villa_name, tuple(entities))
+    welcome_automation = _build_welcome_automation(
+        slug,
+        villa_name,
+        tuple(entities),
+        media_player,
+        welcome_playlist=welcome_playlist,
+        background_playlist=background_playlist,
+        volume_percent=welcome_volume_percent,
+        background_delay=welcome_to_background_delay,
+    )
 
     return HomeAssistantPackage(
         villa_id=project.guid,
@@ -192,6 +234,7 @@ def _build_package(
         scenes=scenes,
         scripts=scripts,
         media_players=(media_player,) if media_player else (),
+        automations=(welcome_automation,) if welcome_automation else (),
     )
 
 
@@ -354,6 +397,64 @@ def _build_audio_media_player(
     )
 
 
+def _build_welcome_automation(
+    slug: str,
+    villa_name: str,
+    entities: tuple[HaEntity, ...],
+    media_player: HaMediaPlayer | None,
+    *,
+    welcome_playlist: int | None,
+    background_playlist: int | None,
+    volume_percent: float,
+    background_delay: str,
+) -> HaAutomation | None:
+    """Standard check-in automation for any villa that has both a "Guest"
+    switch and an audio media_player (see _build_audio_media_player) -
+    matched by name, same as every other generator here; nothing here is
+    specific to any one villa.
+
+    Trigger: "Guest" turns on. Actions: power the audio module on, select
+    the welcome playlist, start playback, set the welcome volume, then
+    after a delay switch to the background playlist.
+
+    `welcome_playlist`/`background_playlist` are raw numeric indices, not
+    names: "Audio Playlist Select" (see _apply_audio_module_semantics) is
+    a plain writable number with no name<->index catalog anywhere in
+    ETSProject - there is nothing here that could resolve a name like
+    "Welcome" to the right value for a given installation, so the caller
+    must supply the real index. Returns None if the villa has no "Guest"
+    switch, no audio media_player, or the playlist indices weren't given
+    at all (see build_package).
+    """
+    if media_player is None or welcome_playlist is None or background_playlist is None:
+        return None
+    guest = next((e for e in entities if e.name == "Guest" and e.domain == "switch"), None)
+    if guest is None:
+        return None
+
+    mp_entity_id = _media_player_entity_id(media_player)
+
+    def call(action: str, data: dict[str, object] | None = None) -> dict[str, object]:
+        step: dict[str, object] = {"action": action, "target": {"entity_id": mp_entity_id}}
+        if data:
+            step["data"] = data
+        return step
+
+    return HaAutomation(
+        unique_id=f"{slug}_welcome",
+        name=f"{villa_name} Welcome",
+        triggers=({"trigger": "state", "entity_id": _entity_id(guest), "to": "on"},),
+        actions=(
+            call("media_player.turn_on"),
+            call("media_player.select_source", {"source": str(welcome_playlist)}),
+            call("media_player.media_play"),
+            call("media_player.volume_set", {"volume_level": volume_percent / 100}),
+            {"delay": background_delay},
+            call("media_player.select_source", {"source": str(background_playlist)}),
+        ),
+    )
+
+
 def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
     """Build a one-view overview dashboard for a villa's package."""
     cards = []
@@ -383,7 +484,7 @@ def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
             DashboardCard(
                 title=media_player.name,
                 card_type="media-control",
-                entity=f"media_player.{_slugify(media_player.name)}",
+                entity=_media_player_entity_id(media_player),
             )
         )
 

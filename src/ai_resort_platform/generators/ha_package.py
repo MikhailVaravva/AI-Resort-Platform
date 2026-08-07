@@ -63,19 +63,21 @@ class HaMediaPlayer:
 
 @dataclass(frozen=True, slots=True)
 class HaAutomation:
-    """One Home Assistant `automation` (trigger -> action).
+    """One Home Assistant `automation` (triggers -> actions).
 
-    Not populated from the current data source: raw KNX group addresses
-    describe wiring, not "when X then Y" behaviour, so there is nothing to
-    derive an automation from. Kept as a real, typed part of the package so
-    a future source of behavioural intent can be wired in without changing
-    this model - see generators/ha_builder.py.
+    Field names match the current official automation schema
+    (home-assistant.io/docs/automation/yaml/) - `triggers`/`actions`
+    (plural), not the older singular `trigger`/`action` keys. Not derived
+    from raw KNX wiring (there is no "when X then Y" signal in group
+    addresses themselves): populated by generators that know a standard
+    behavioural pattern independent of any one villa's data, e.g.
+    homeassistant/builder.py:_build_welcome_automation.
     """
 
     unique_id: str
     name: str
-    trigger: tuple[dict[str, object], ...] = field(default_factory=tuple)
-    action: tuple[dict[str, object], ...] = field(default_factory=tuple)
+    triggers: tuple[dict[str, object], ...] = field(default_factory=tuple)
+    actions: tuple[dict[str, object], ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)

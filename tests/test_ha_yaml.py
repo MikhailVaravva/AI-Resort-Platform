@@ -4,6 +4,7 @@ from ai_resort_platform.generators.ha_package import (
     Dashboard,
     DashboardCard,
     DashboardView,
+    HaAutomation,
     HaEntity,
     HaMediaPlayer,
     HaScene,
@@ -159,6 +160,45 @@ def test_package_to_yaml_media_player_state_template():
         == "{% if is_state('switch.power', 'off') %}off{% endif %}"
     )
     assert "state_template" not in data["media_player"][0]["attributes"]
+
+
+def test_package_to_yaml_automation_uses_plural_triggers_and_actions():
+    """Current official automation schema (home-assistant.io/docs/
+    automation/yaml/) - not the older singular trigger/action keys."""
+    package = HomeAssistantPackage(
+        villa_id="v-1",
+        villa_name="Villa X1",
+        automations=(
+            HaAutomation(
+                unique_id="villa_x1_welcome",
+                name="Villa X1 Welcome",
+                triggers=({"trigger": "state", "entity_id": "switch.guest", "to": "on"},),
+                actions=(
+                    {
+                        "action": "media_player.turn_on",
+                        "target": {"entity_id": "media_player.villa_x1_audio"},
+                    },
+                    {"delay": "00:05:00"},
+                ),
+            ),
+        ),
+    )
+
+    data = yaml.safe_load(package_to_yaml(package))
+
+    assert data["automation"] == [
+        {
+            "alias": "Villa X1 Welcome",
+            "triggers": [{"trigger": "state", "entity_id": "switch.guest", "to": "on"}],
+            "actions": [
+                {
+                    "action": "media_player.turn_on",
+                    "target": {"entity_id": "media_player.villa_x1_audio"},
+                },
+                {"delay": "00:05:00"},
+            ],
+        }
+    ]
 
 
 def test_package_to_yaml_omits_empty_sections():

@@ -316,3 +316,53 @@ def test_reference_villa_dashboard_has_a_media_control_card_for_the_media_player
     card = cards_by_title["Villa A1 Audio"]
     assert card.card_type == "media-control"
     assert card.entity == "media_player.villa_a1_audio"
+
+
+def test_reference_villa_welcome_automation_is_opt_in():
+    """No welcome automation without explicit playlist indices - nothing
+    in ETSProject can supply them."""
+    package = _build()
+
+    assert package.automations == ()
+
+
+def test_reference_villa_welcome_automation():
+    project = ETSProject.open(REFERENCE_VILLA, password="12345")
+
+    package = build_package(project, welcome_playlist=1, background_playlist=2)
+
+    assert len(package.automations) == 1
+    automation = package.automations[0]
+    assert automation.unique_id == "villa_a1_welcome"
+    assert automation.name == "Villa A1 Welcome"
+    assert automation.triggers == ({"trigger": "state", "entity_id": "switch.guest", "to": "on"},)
+    assert automation.actions[0] == {
+        "action": "media_player.turn_on",
+        "target": {"entity_id": "media_player.villa_a1_audio"},
+    }
+    assert automation.actions[1] == {
+        "action": "media_player.select_source",
+        "target": {"entity_id": "media_player.villa_a1_audio"},
+        "data": {"source": "1"},
+    }
+    assert automation.actions[4] == {"delay": "00:05:00"}
+    assert automation.actions[5] == {
+        "action": "media_player.select_source",
+        "target": {"entity_id": "media_player.villa_a1_audio"},
+        "data": {"source": "2"},
+    }
+
+
+def test_reference_villa_welcome_automation_yaml_structure():
+    project = ETSProject.open(REFERENCE_VILLA, password="12345")
+    package = build_package(project, welcome_playlist=1, background_playlist=2)
+
+    data = yaml.safe_load(package_to_yaml(package))
+
+    assert len(data["automation"]) == 1
+    automation = data["automation"][0]
+    assert automation["alias"] == "Villa A1 Welcome"
+    assert "triggers" in automation
+    assert "actions" in automation
+    assert "trigger" not in automation
+    assert "action" not in automation

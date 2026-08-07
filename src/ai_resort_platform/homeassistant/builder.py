@@ -324,9 +324,18 @@ def _build_entities_for(
 ) -> list[HaEntity]:
     base_id = f"{slug}_{_slugify(name)}"
     light_keys = {k for k in dpts if k in _LIGHT_DPTS}
+    switch_keys = {k for k in dpts if k[0] == _SWITCH_DPT_MAIN}
 
-    if light_keys:
-        switch_keys = {k for k in dpts if k[0] == _SWITCH_DPT_MAIN}
+    # The KNX `light` platform requires `address` (switching) or
+    # `individual_colors` - confirmed against a real Home Assistant
+    # instance, which rejects a light with only `brightness_address`/
+    # `color_temperature_address` and no switch DPT at all (e.g. a DMX
+    # dimmer channel or "Audio Absolut volume" that only has a DPT 5.001
+    # scaling address, no DPT 1.x). Without a switch key there is no valid
+    # `light` config to build, so these fall through to `_sensor_fallback`
+    # instead (DPT 5.001/7.600 both have documented sensor.type values -
+    # "percent"/"color_temperature" - so they're still exposed, read-only).
+    if light_keys and switch_keys:
         used_keys = light_keys | switch_keys
         config = _light_config(dpts, light_keys, switch_keys)
         entities = [HaEntity(domain="light", unique_id=base_id, name=name, config=config)]
@@ -348,8 +357,7 @@ def _build_entities_for(
     # command and one status total - DPT 1.x has no valid `sensor.type`
     # (see _DPT_LABELS), so this is the only way such a pair can become
     # valid HA KNX config at all, not just a cosmetic grouping choice.
-    switch_main_keys = {k for k in dpts if k[0] == _SWITCH_DPT_MAIN}
-    if switch_main_keys == set(dpts):
+    if switch_keys == set(dpts):
         commands = [roles["command"] for roles in dpts.values() if "command" in roles]
         statuses = [roles["status"] for roles in dpts.values() if "status" in roles]
         if len(commands) <= 1 and len(statuses) <= 1:

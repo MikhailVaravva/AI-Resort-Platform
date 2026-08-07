@@ -109,6 +109,11 @@ def test_curtain_group_addresses_merge_into_one_cover():
 
 
 def test_command_and_status_with_mismatched_wording_still_merge():
+    """The "value"/"status" naming quirk is still resolved into one
+    entity_key regardless of the DPT - here there's no DPT-1.x switch
+    key, so per the KNX `light` platform's required `address` field
+    (confirmed against a real Home Assistant instance), this becomes a
+    read-only `sensor` rather than an unbuildable `light`."""
     gas = (
         GroupAddress(
             id="1", address="1/1/160", name="A1 DMX Terrace Red value", dpt_main=5, dpt_sub=1
@@ -120,10 +125,8 @@ def test_command_and_status_with_mismatched_wording_still_merge():
     package = build_package(_project(gas))
 
     assert len(package.entities) == 1
-    assert package.entities[0].config == {
-        "brightness_address": "1/1/160",
-        "brightness_state_address": "1/1/161",
-    }
+    assert package.entities[0].domain == "sensor"
+    assert package.entities[0].config == {"type": "percent", "state_address": "1/1/161"}
 
 
 def test_multi_dpt_non_light_entity_fans_out_to_one_sensor_per_dpt():
@@ -206,10 +209,11 @@ def test_unique_id_is_scoped_to_the_room_not_the_whole_project():
 
 def test_build_dashboard_groups_entities_by_domain():
     gas = (
+        GroupAddress(id="1", address="1/1/0", name="A1 G1 on/off", dpt_main=1, dpt_sub=1),
         GroupAddress(
-            id="1", address="1/1/2", name="A1 G1 Brightness Absolut", dpt_main=5, dpt_sub=1
+            id="2", address="1/1/2", name="A1 G1 Brightness Absolut", dpt_main=5, dpt_sub=1
         ),
-        GroupAddress(id="2", address="1/1/20", name="A1 Stone Power", dpt_main=1, dpt_sub=1),
+        GroupAddress(id="3", address="1/1/20", name="A1 Stone Power", dpt_main=1, dpt_sub=1),
     )
     package = build_package(_project(gas))
     dashboard = build_dashboard(package)

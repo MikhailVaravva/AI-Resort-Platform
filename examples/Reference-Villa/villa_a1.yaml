@@ -18,32 +18,6 @@ knx:
     state_address: 1/1/11
     brightness_address: 1/1/12
     brightness_state_address: 1/1/13
-  - name: DMX Stone Red
-    brightness_address: 1/1/100
-  - name: DMX Stone Green
-    brightness_address: 1/1/102
-  - name: DMX Stone Blue
-    brightness_address: 1/1/104
-  - name: DMX Stone White
-    brightness_address: 1/1/106
-  - name: DMX Terrace Red
-    brightness_address: 1/1/160
-    brightness_state_address: 1/1/161
-  - name: DMX Terrace Green
-    brightness_address: 1/1/162
-    brightness_state_address: 1/1/163
-  - name: DMX Terrace Blue
-    brightness_address: 1/1/164
-    brightness_state_address: 1/1/165
-  - name: DMX Terrace White
-    brightness_address: 1/1/166
-    brightness_state_address: 1/1/167
-  - name: DMX Terrace Dimming
-    brightness_address: 1/1/170
-  - name: Audio Absolut volume
-    brightness_address: 1/1/211
-  - name: Audio Volume
-    brightness_state_address: 1/1/212
   switch:
   - name: Stone Power
     address: 1/1/20
@@ -84,6 +58,39 @@ knx:
   - name: Humidity
     type: humidity
     state_address: 1/1/41
+  - name: DMX Stone Red
+    type: percent
+    state_address: 1/1/100
+  - name: DMX Stone Green
+    type: percent
+    state_address: 1/1/102
+  - name: DMX Stone Blue
+    type: percent
+    state_address: 1/1/104
+  - name: DMX Stone White
+    type: percent
+    state_address: 1/1/106
+  - name: DMX Terrace Red
+    type: percent
+    state_address: 1/1/161
+  - name: DMX Terrace Green
+    type: percent
+    state_address: 1/1/163
+  - name: DMX Terrace Blue
+    type: percent
+    state_address: 1/1/165
+  - name: DMX Terrace White
+    type: percent
+    state_address: 1/1/167
+  - name: DMX Terrace Dimming
+    type: percent
+    state_address: 1/1/170
+  - name: Audio Absolut volume
+    type: percent
+    state_address: 1/1/211
+  - name: Audio Volume
+    type: percent
+    state_address: 1/1/212
   - name: Audio Track name
     type: latin_1
     state_address: 1/1/231

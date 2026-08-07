@@ -36,7 +36,7 @@ def test_reference_villa_domain_distribution():
     package = _build()
 
     counts = collections.Counter(e.domain for e in package.entities)
-    assert counts == {"switch": 13, "light": 13, "sensor": 5, "cover": 1, "date": 1}
+    assert counts == {"switch": 13, "light": 2, "sensor": 16, "cover": 1, "date": 1}
 
 
 def test_reference_villa_no_unique_id_collisions():
@@ -115,7 +115,7 @@ def test_reference_villa_package_yaml_round_trips_via_existing_generator():
 
     assert set(data.keys()) == {"knx", "script"}
     assert set(data["knx"].keys()) == {"switch", "light", "sensor", "cover", "scene", "date"}
-    assert len(data["knx"]["light"]) == 13
+    assert len(data["knx"]["light"]) == 2
     assert len(data["knx"]["scene"]) == 6
     assert len(data["script"]) == 6
 
@@ -187,7 +187,7 @@ def test_reference_villa_audio_module_package_excludes_touch_panel_mirrors():
     by_id = {e.unique_id: e for e in package.entities}
     assert set(by_id) == {
         "villa_a1_audio_power",
-        "villa_a1_audio_absolut_volume",
+        "villa_a1_audio_absolut_volume_percent",
         "villa_a1_audio_mute",
         "villa_a1_audio_play_pause",
         "villa_a1_audio_next_prev",
@@ -202,6 +202,15 @@ def test_reference_villa_audio_module_package_excludes_touch_panel_mirrors():
     # is available on the module-scoped package for these:
     assert by_id["villa_a1_audio_mute"].config == {"address": "1/1/220"}
     assert by_id["villa_a1_audio_play_pause"].config == {"address": "1/1/222"}
+    # DPT 5.001 with no companion DPT-1.x switch address - the KNX `light`
+    # platform requires `address` (or `individual_colors`), confirmed
+    # against a real Home Assistant instance, so this is a read-only
+    # `sensor` rather than an unbuildable `light`.
+    assert by_id["villa_a1_audio_absolut_volume_percent"].domain == "sensor"
+    assert by_id["villa_a1_audio_absolut_volume_percent"].config == {
+        "type": "percent",
+        "state_address": "1/1/211",
+    }
 
 
 def test_reference_villa_audio_module_package_yaml_round_trips():
@@ -211,4 +220,4 @@ def test_reference_villa_audio_module_package_yaml_round_trips():
     data = yaml.safe_load(package_to_yaml(package))
 
     assert set(data.keys()) == {"knx"}
-    assert set(data["knx"].keys()) == {"switch", "light", "sensor"}
+    assert set(data["knx"].keys()) == {"switch", "sensor"}

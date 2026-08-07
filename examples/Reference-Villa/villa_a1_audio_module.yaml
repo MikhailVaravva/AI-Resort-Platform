@@ -9,10 +9,10 @@ knx:
     address: 1/1/222
   - name: Audio Next/Prev
     address: 1/1/226
-  light:
-  - name: Audio Absolut volume
-    brightness_address: 1/1/211
   sensor:
+  - name: Audio Absolut volume
+    type: percent
+    state_address: 1/1/211
   - name: Audio Track name
     type: latin_1
     state_address: 1/1/231

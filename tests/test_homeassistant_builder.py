@@ -1,7 +1,7 @@
 from ai_resort_platform.ets.group_addresses import GroupAddress
 from ai_resort_platform.ets.project import ETSProject
 from ai_resort_platform.ets.rooms import Room
-from ai_resort_platform.homeassistant.builder import build_package
+from ai_resort_platform.homeassistant.builder import build_dashboard, build_package
 
 
 def _project(group_addresses: tuple[GroupAddress, ...]) -> ETSProject:
@@ -167,6 +167,24 @@ def test_unique_id_is_scoped_to_the_room_not_the_whole_project():
 
     assert package.villa_name == "Villa A1"
     assert package.entities[0].unique_id == "villa_a1_stone_power"
+
+
+def test_build_dashboard_groups_entities_by_domain():
+    gas = (
+        GroupAddress(
+            id="1", address="1/1/2", name="A1 G1 Brightness Absolut", dpt_main=5, dpt_sub=1
+        ),
+        GroupAddress(id="2", address="1/1/20", name="A1 Stone Power", dpt_main=1, dpt_sub=1),
+    )
+    package = build_package(_project(gas))
+    dashboard = build_dashboard(package)
+
+    assert len(dashboard.views) == 1
+    view = dashboard.views[0]
+    assert view.title == "Hot Stone VILLA"
+    cards_by_title = {c.title: c for c in view.cards}
+    assert cards_by_title["Lights"].entities == ("light.hot_stone_villa_g1",)
+    assert cards_by_title["Switches"].entities == ("switch.hot_stone_villa_stone_power",)
 
 
 def test_scenes_produce_scene_entity_and_activation_script():

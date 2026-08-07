@@ -9,10 +9,10 @@ project no longer builds - ETSProject exposes flat GroupAddresses instead,
 so grouping them into entities (and now scenes) has to happen here,
 directly from ETSProject.group_addresses.
 
-Scope: entities (light/switch/binary_sensor/cover/sensor) and scenes/
-scripts - the same coverage as generators/ha_builder.py. No automations
-(neither builder has any - see generators/ha_package.py:HaAutomation) and
-no dashboard (never migrated here since nothing has needed it yet).
+Scope: entities (light/switch/binary_sensor/cover/sensor), scenes/scripts,
+and the overview dashboard - full coverage of generators/ha_builder.py. No
+automations (neither builder has any - see
+generators/ha_package.py:HaAutomation).
 """
 
 import re
@@ -20,6 +20,9 @@ import re
 from ai_resort_platform.ets.group_addresses import GroupAddress
 from ai_resort_platform.ets.project import ETSProject
 from ai_resort_platform.generators.ha_package import (
+    Dashboard,
+    DashboardCard,
+    DashboardView,
     HaEntity,
     HaScene,
     HaScript,
@@ -72,6 +75,14 @@ _DPT_LABELS: dict[tuple[int, int | None], str] = {
     (18, 1): "sceneControl",
 }
 
+_DASHBOARD_SECTIONS = (
+    ("light", "Lights"),
+    ("cover", "Covers"),
+    ("switch", "Switches"),
+    ("binary_sensor", "Binary Sensors"),
+    ("sensor", "Sensors"),
+)
+
 
 def _slugify(text: str) -> str:
     slug = _SLUG_INVALID.sub("_", text.lower()).strip("_")
@@ -105,6 +116,33 @@ def build_package(project: ETSProject) -> HomeAssistantPackage:
         scenes=scenes,
         scripts=scripts,
     )
+
+
+def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
+    """Build a one-view overview dashboard for a villa's package."""
+    cards = []
+    for domain, title in _DASHBOARD_SECTIONS:
+        entity_ids = tuple(
+            f"{domain}.{e.unique_id}" for e in package.entities if e.domain == domain
+        )
+        if entity_ids:
+            cards.append(DashboardCard(title=title, entities=entity_ids))
+
+    if package.scenes:
+        cards.append(
+            DashboardCard(
+                title="Scenes", entities=tuple(f"scene.{s.unique_id}" for s in package.scenes)
+            )
+        )
+    if package.scripts:
+        cards.append(
+            DashboardCard(
+                title="Scripts", entities=tuple(f"script.{s.unique_id}" for s in package.scripts)
+            )
+        )
+
+    view = DashboardView(title=package.villa_name, cards=tuple(cards))
+    return Dashboard(villa_id=package.villa_id, title=package.villa_name, views=(view,))
 
 
 def _strip_villa_code(name: str) -> str:

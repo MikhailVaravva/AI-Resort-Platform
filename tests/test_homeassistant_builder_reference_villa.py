@@ -7,8 +7,13 @@ import yaml
 
 from ai_resort_platform.ets.project import ETSProject
 from ai_resort_platform.generators.ha_package import HomeAssistantPackage
-from ai_resort_platform.generators.ha_yaml import package_to_yaml, write_package
-from ai_resort_platform.homeassistant.builder import build_package
+from ai_resort_platform.generators.ha_yaml import (
+    dashboard_to_yaml,
+    package_to_yaml,
+    write_dashboard,
+    write_package,
+)
+from ai_resort_platform.homeassistant.builder import build_dashboard, build_package
 
 REFERENCE_VILLA = (
     Path(__file__).resolve().parent.parent
@@ -127,3 +132,38 @@ def test_reference_villa_package_is_stable_across_rebuilds():
 
     assert [e.unique_id for e in first.entities] == [e.unique_id for e in second.entities]
     assert first == second
+
+
+def test_reference_villa_dashboard_covers_every_domain_present():
+    package = _build()
+
+    dashboard = build_dashboard(package)
+    view = dashboard.views[0]
+    card_titles = {c.title for c in view.cards}
+
+    assert card_titles == {"Lights", "Sensors", "Switches", "Covers", "Scenes", "Scripts"}
+
+    total_entities_in_cards = sum(len(c.entities) for c in view.cards)
+    assert total_entities_in_cards == len(package.entities) + len(package.scenes) + len(
+        package.scripts
+    )
+
+
+def test_reference_villa_dashboard_yaml_round_trips():
+    package = _build()
+    dashboard = build_dashboard(package)
+
+    data = yaml.safe_load(dashboard_to_yaml(dashboard))
+
+    assert data["title"] == "Villa A1"
+    assert len(data["views"]) == 1
+
+
+def test_reference_villa_writes_a_dashboard_file(tmp_path):
+    package = _build()
+    dashboard = build_dashboard(package)
+    path = tmp_path / "villa_a1_dashboard.yaml"
+
+    write_dashboard(dashboard, path)
+
+    assert yaml.safe_load(path.read_text(encoding="utf-8"))

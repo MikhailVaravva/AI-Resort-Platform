@@ -62,6 +62,20 @@ class HaMediaPlayer:
 
 
 @dataclass(frozen=True, slots=True)
+class HaTemplateSensor:
+    """One Home Assistant `template` sensor (home-assistant.io/
+    integrations/template/), for a value that has to be computed with
+    Jinja - unlike `HaMediaPlayer.attributes`, which only accepts a bare
+    entity/attribute reference and cannot do unit conversion itself.
+    `state` must render to a number or `none`, per that platform's schema.
+    """
+
+    unique_id: str
+    name: str
+    state: str
+
+
+@dataclass(frozen=True, slots=True)
 class HaAutomation:
     """One Home Assistant `automation` (triggers -> actions).
 
@@ -90,6 +104,7 @@ class HomeAssistantPackage:
     scenes: tuple[HaScene, ...] = field(default_factory=tuple)
     scripts: tuple[HaScript, ...] = field(default_factory=tuple)
     media_players: tuple[HaMediaPlayer, ...] = field(default_factory=tuple)
+    template_sensors: tuple[HaTemplateSensor, ...] = field(default_factory=tuple)
     automations: tuple[HaAutomation, ...] = field(default_factory=tuple)
 
 

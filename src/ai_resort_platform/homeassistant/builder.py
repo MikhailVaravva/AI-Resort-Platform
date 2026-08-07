@@ -28,6 +28,7 @@ from ai_resort_platform.generators.ha_package import (
     HaMediaPlayer,
     HaScene,
     HaScript,
+    HaTemplateSensor,
     HomeAssistantPackage,
 )
 
@@ -216,6 +217,7 @@ def _build_package(
 
     entities = list(_apply_audio_module_semantics(tuple(entities)))
     media_player = _build_audio_media_player(slug, villa_name, tuple(entities))
+    volume_level_sensor = _build_volume_level_sensor(slug, villa_name, tuple(entities))
     welcome_automation = _build_welcome_automation(
         slug,
         villa_name,
@@ -234,6 +236,7 @@ def _build_package(
         scenes=scenes,
         scripts=scripts,
         media_players=(media_player,) if media_player else (),
+        template_sensors=(volume_level_sensor,) if volume_level_sensor else (),
         automations=(welcome_automation,) if welcome_automation else (),
     )
 
@@ -256,7 +259,16 @@ def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEnt
       borrows "Audio Power"'s (the same physical module, already a
       command target) to satisfy it, while `brightness_address` is the
       real, writable volume value - the point of this change is to make
-      volume actually controllable, not just observable.
+      volume actually controllable, not just observable. It's given
+      `entity_category: config` (a documented common KNX option, see
+      home-assistant.io/integrations/knx/): the media_player's own
+      volume slider (backed by this light, see
+      _build_audio_media_player/_build_volume_level_sensor) is the
+      intended user-facing control, so this stays a purely internal
+      KNX implementation detail - HA's default dashboard/area cards
+      exclude `config`/`diagnostic` entities, and build_dashboard does
+      the same for our own generated dashboard (see there), so a
+      "Volume" light never shows up in a "Lights" list next to real ones.
     - "Audio Playlist Select" (DPT 5, no sub-type) is wired to the exact
       same communication object as "Audio Absolut volume" (verified:
       identical read/write/communication/transmit flags) - a real,
@@ -278,6 +290,7 @@ def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEnt
                     config={
                         "address": power.config["address"],
                         "brightness_address": entity.config["state_address"],
+                        "entity_category": "config",
                     },
                 )
             )
@@ -319,6 +332,11 @@ def _build_audio_media_player(
     if not (power and play_pause and next_track and volume and mute and title and playlist):
         return None
 
+    # Built by _build_volume_level_sensor, alongside this media_player -
+    # same deterministic name, so both agree on this entity_id without
+    # either one having to be passed into the other.
+    volume_level_entity_id = f"sensor.{slug}_audio_volume"
+
     def service(
         action: str, target: HaEntity, data: dict[str, object] | None = None
     ) -> dict[str, object]:
@@ -346,12 +364,17 @@ def _build_audio_media_player(
             # "Audio Absolut volume" is rebuilt as a `light` (see
             # _apply_audio_module_semantics) specifically so this can be a
             # real write, not just a display - light.turn_on's
-            # brightness_pct (0-100) is the volume percentage HA's
-            # 0.0-1.0 volume_level maps onto directly.
+            # brightness_pct (0-100) is HA's 0.0-1.0 volume_level * 100,
+            # clamped to [0, 100] in case a caller ever passes something
+            # out of range (KNX DPT 5.001 itself only accepts 0-100%).
             "volume_set": service(
                 "light.turn_on",
                 volume,
-                {"brightness_pct": "{{ (volume_level * 100) | round(0) }}"},
+                {
+                    "brightness_pct": (
+                        "{{ [0, [100, (volume_level * 100) | round(0)] | min] | max }}"
+                    )
+                },
             ),
             # "Audio Playlist Select" is rebuilt as a `number` (see
             # _apply_audio_module_semantics) so this can write the
@@ -383,17 +406,51 @@ def _build_audio_media_player(
         attributes={
             "is_volume_muted": _entity_id(mute),
             # KNX `light.brightness` is HA's normalized 0-255 scale (xknx
-            # converts the DPT 5.001 0-100% value for us) - still not the
-            # exact 0.0-1.0 `volume_level` expects, since the `universal`
-            # platform's `attributes:` supports only a bare entity/
-            # attribute reference, no conversion. Documented limitation,
-            # not fixable without a value not covered by this mapping.
-            "volume_level": f"{_entity_id(volume)}|brightness",
+            # converts the DPT 5.001 0-100% value for us), not the 0.0-1.0
+            # `volume_level` expects, and the `universal` platform's
+            # `attributes:` can't convert it (bare entity/attribute
+            # reference only, no templates) - so this reads the 0.0-1.0
+            # value from a small `template` sensor instead
+            # (_build_volume_level_sensor), which does support templating.
+            "volume_level": volume_level_entity_id,
             "media_title": _entity_id(title),
             # No `source_list` for the same reason: the project has no
             # catalog of playlist names, only this numeric index.
             "source": _entity_id(playlist),
         },
+    )
+
+
+# Universal Media Player expects volume_level in the range 0.0..1.0.
+# KNX brightness is 0..255, therefore a template sensor is used for
+# normalization. Universal Media Player attributes do not support Jinja
+# templates directly.
+def _build_volume_level_sensor(
+    slug: str, villa_name: str, entities: tuple[HaEntity, ...]
+) -> HaTemplateSensor | None:
+    """A `template` sensor converting "Audio Absolut volume" (rebuilt as a
+    `light`, see _apply_audio_module_semantics) from HA's normalized
+    0-255 `brightness` scale to the 0.0-1.0 `_build_audio_media_player`'s
+    `volume_level` attribute needs - the `universal` platform's
+    `attributes:` has no templating of its own to do this conversion
+    itself (see there). Clamped to [0.0, 1.0] and defaults to 0 while the
+    light's brightness is unknown/unavailable, so the template never
+    errors. Returns None if this villa has no "Audio Absolut volume"
+    entity at all (matches _build_audio_media_player's own check).
+    """
+    volume = next((e for e in entities if e.name == "Audio Absolut volume"), None)
+    if volume is None:
+        return None
+
+    light_entity_id = _entity_id(volume)
+    return HaTemplateSensor(
+        unique_id=f"{slug}_audio_volume",
+        name=f"{villa_name} Audio Volume",
+        state=(
+            "{{ [0.0, [1.0, "
+            f"(state_attr('{light_entity_id}', 'brightness') | float(0)) / 255"
+            "] | min] | max }}"
+        ),
     )
 
 
@@ -456,10 +513,21 @@ def _build_welcome_automation(
 
 
 def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
-    """Build a one-view overview dashboard for a villa's package."""
+    """Build a one-view overview dashboard for a villa's package.
+
+    Entities with `entity_category` set (e.g. "Audio Absolut volume", see
+    _apply_audio_module_semantics) are internal KNX implementation
+    details, not something a resident should see in a "Lights"/etc. list
+    - mirrors how HA's own default dashboard/area cards already exclude
+    `config`/`diagnostic` entities.
+    """
     cards = []
     for domain, title in _DASHBOARD_SECTIONS:
-        entity_ids = tuple(_entity_id(e) for e in package.entities if e.domain == domain)
+        entity_ids = tuple(
+            _entity_id(e)
+            for e in package.entities
+            if e.domain == domain and "entity_category" not in e.config
+        )
         if entity_ids:
             cards.append(DashboardCard(title=title, entities=entity_ids))
 

@@ -21,6 +21,7 @@ knx:
   - name: Audio Absolut volume
     address: 1/1/202
     brightness_address: 1/1/211
+    entity_category: config
   switch:
   - name: Stone Power
     address: 1/1/20
@@ -195,7 +196,8 @@ media_player:
       target:
         entity_id: light.audio_absolut_volume
       data:
-        brightness_pct: '{{ (volume_level * 100) | round(0) }}'
+        brightness_pct: '{{ [0, [100, (volume_level * 100) | round(0)] | min] | max
+          }}'
     select_source:
       action: number.set_value
       target:
@@ -204,9 +206,15 @@ media_player:
         value: '{{ source }}'
   attributes:
     is_volume_muted: switch.audio_mute
-    volume_level: light.audio_absolut_volume|brightness
+    volume_level: sensor.villa_a1_audio_volume
     media_title: sensor.audio_track_name
     source: number.audio_playlist_select
   state_template: "{% if is_state('switch.audio_power', 'off') %}\n  off\n{% elif\
     \ is_state('switch.audio_play_pause', 'on') %}\n  playing\n{% else %}\n  idle\n\
     {% endif %}"
+template:
+- sensor:
+  - name: Villa A1 Audio Volume
+    unique_id: villa_a1_audio_volume
+    state: '{{ [0.0, [1.0, (state_attr(''light.audio_absolut_volume'', ''brightness'')
+      | float(0)) / 255] | min] | max }}'

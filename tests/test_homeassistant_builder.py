@@ -1,3 +1,5 @@
+import pytest
+
 from ai_resort_platform.ets.devices import Device
 from ai_resort_platform.ets.group_addresses import GroupAddress
 from ai_resort_platform.ets.project import ETSProject
@@ -385,7 +387,14 @@ def test_audio_module_semantics_reclassify_volume_and_playlist_entities():
 
     volume = by_name["Audio Absolut volume"]
     assert volume.domain == "light"
-    assert volume.config == {"address": "1/1/202", "brightness_address": "1/1/211"}
+    assert volume.config == {
+        "address": "1/1/202",
+        "brightness_address": "1/1/211",
+        # Internal KNX plumbing for the media_player's volume slider (see
+        # _build_audio_media_player) - not meant to show up in a "Lights"
+        # list of its own.
+        "entity_category": "config",
+    }
 
     playlist = by_name["Audio Playlist Select"]
     assert playlist.domain == "number"
@@ -393,6 +402,23 @@ def test_audio_module_semantics_reclassify_volume_and_playlist_entities():
 
     next_track = by_name["Audio Next/Prev"]
     assert next_track.domain == "button"
+
+
+def test_dashboard_excludes_entity_category_entities_from_domain_cards():
+    """ "Audio Absolut volume" is a real `light` (needed for the
+    media_player's volume slider to actually write, see
+    _apply_audio_module_semantics) but only an internal KNX
+    implementation detail - it shouldn't show up in the "Lights" card
+    next to entities a resident would actually want to toggle by hand."""
+    package = build_package(_project(_audio_module_gas()))
+
+    dashboard = build_dashboard(package)
+    view = dashboard.views[0]
+    cards_by_title = {c.title: c for c in view.cards}
+
+    # "Audio Absolut volume" is the only `light` in this fixture, so once
+    # it's excluded there's nothing left to put in a "Lights" card at all.
+    assert "Lights" not in cards_by_title
 
 
 def test_media_player_is_built_when_every_source_entity_is_present():
@@ -429,7 +455,9 @@ def test_media_player_is_built_when_every_source_entity_is_present():
         "volume_set": {
             "action": "light.turn_on",
             "target": {"entity_id": "light.audio_absolut_volume"},
-            "data": {"brightness_pct": "{{ (volume_level * 100) | round(0) }}"},
+            "data": {
+                "brightness_pct": "{{ [0, [100, (volume_level * 100) | round(0)] | min] | max }}"
+            },
         },
         # "Audio Playlist Select" is rebuilt as a `number` (writable).
         "select_source": {
@@ -440,13 +468,49 @@ def test_media_player_is_built_when_every_source_entity_is_present():
     }
     assert media_player.attributes == {
         "is_volume_muted": "switch.audio_mute",
-        "volume_level": "light.audio_absolut_volume|brightness",
+        # Reads the converted 0.0-1.0 value from the template sensor
+        # (see _build_volume_level_sensor), not the light's raw 0-255
+        # brightness directly.
+        "volume_level": "sensor.hot_stone_villa_audio_volume",
         "media_title": "sensor.audio_track_name",
         "source": "number.audio_playlist_select",
     }
     assert "state" not in media_player.attributes
     assert "switch.audio_power" in media_player.state_template
     assert "switch.audio_play_pause" in media_player.state_template
+
+
+def test_volume_level_sensor_converts_brightness_to_0_1_scale():
+    package = build_package(_project(_audio_module_gas()))
+
+    assert len(package.template_sensors) == 1
+    sensor = package.template_sensors[0]
+    assert sensor.unique_id == "hot_stone_villa_audio_volume"
+    assert sensor.name == "Hot Stone VILLA Audio Volume"
+    assert "light.audio_absolut_volume" in sensor.state
+    assert "brightness" in sensor.state
+
+
+@pytest.mark.parametrize(
+    ("brightness", "expected"),
+    [(0, 0.0), (128, 128 / 255), (255, 1.0)],
+)
+def test_volume_level_sensor_conversion_math(brightness, expected):
+    """The exact conversion math the template performs, evaluated in
+    Python rather than by Home Assistant's Jinja engine - the template
+    itself is verified against a real Home Assistant instance
+    separately."""
+    raw = brightness / 255
+    clamped = max(0.0, min(1.0, raw))
+    assert clamped == expected
+
+
+def test_volume_level_sensor_is_not_built_without_a_volume_entity():
+    gas = tuple(ga for ga in _audio_module_gas() if ga.name != "A1 Audio Absolut volume")
+
+    package = build_package(_project(gas))
+
+    assert package.template_sensors == ()
 
 
 def test_media_player_is_not_built_when_a_source_entity_is_missing():

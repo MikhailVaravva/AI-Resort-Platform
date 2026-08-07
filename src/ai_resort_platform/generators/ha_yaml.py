@@ -8,6 +8,7 @@ from ai_resort_platform.generators.ha_package import (
     DashboardCard,
     HaEntity,
     HaMediaPlayer,
+    HaTemplateSensor,
     HomeAssistantPackage,
 )
 
@@ -57,6 +58,13 @@ def package_to_yaml(package: HomeAssistantPackage) -> str:
     if package.media_players:
         data["media_player"] = [_media_player_dict(mp) for mp in package.media_players]
 
+    if package.template_sensors:
+        # `template: - sensor: [...]` (home-assistant.io/integrations/
+        # template/) - core HA config, not KNX-specific.
+        data["template"] = [
+            {"sensor": [_template_sensor_dict(s) for s in package.template_sensors]}
+        ]
+
     if package.automations:
         # Plural `triggers`/`actions` - the current official automation
         # schema (home-assistant.io/docs/automation/yaml/), not the older
@@ -91,6 +99,10 @@ def _media_player_dict(media_player: HaMediaPlayer) -> dict[str, Any]:
     if media_player.state_template:
         data["state_template"] = media_player.state_template
     return data
+
+
+def _template_sensor_dict(sensor: HaTemplateSensor) -> dict[str, Any]:
+    return {"name": sensor.name, "unique_id": sensor.unique_id, "state": sensor.state}
 
 
 def write_package(package: HomeAssistantPackage, path: Path) -> None:

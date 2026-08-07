@@ -121,7 +121,7 @@ def test_reference_villa_package_yaml_round_trips_via_existing_generator():
 
     data = yaml.safe_load(package_to_yaml(package))
 
-    assert set(data.keys()) == {"knx", "script", "media_player"}
+    assert set(data.keys()) == {"knx", "script", "media_player", "template"}
     assert set(data["knx"].keys()) == {
         "switch",
         "light",
@@ -178,9 +178,15 @@ def test_reference_villa_dashboard_covers_every_domain_present():
     }
 
     total_entities_in_cards = sum(len(c.entities) for c in view.cards)
-    assert total_entities_in_cards == len(package.entities) + len(package.scenes) + len(
+    # -1: "Audio Absolut volume" has entity_category set (internal KNX
+    # plumbing for the media_player's volume slider, see
+    # _apply_audio_module_semantics) and is deliberately excluded from
+    # every domain card.
+    assert total_entities_in_cards == len(package.entities) - 1 + len(package.scenes) + len(
         package.scripts
     )
+    lights_card = next(c for c in view.cards if c.title == "Lights")
+    assert "light.audio_absolut_volume" not in lights_card.entities
 
 
 def test_reference_villa_dashboard_yaml_round_trips():
@@ -238,6 +244,7 @@ def test_reference_villa_audio_module_package_excludes_touch_panel_mirrors():
     assert by_id["villa_a1_audio_absolut_volume_percent"].config == {
         "address": "1/1/202",
         "brightness_address": "1/1/211",
+        "entity_category": "config",
     }
     # DPST-1-7 "step": a momentary pulse, not a persistent switch state.
     assert by_id["villa_a1_audio_next_prev"].domain == "button"
@@ -256,7 +263,7 @@ def test_reference_villa_audio_module_package_yaml_round_trips():
 
     data = yaml.safe_load(package_to_yaml(package))
 
-    assert set(data.keys()) == {"knx", "media_player"}
+    assert set(data.keys()) == {"knx", "media_player", "template"}
     assert set(data["knx"].keys()) == {"switch", "sensor", "light", "button", "number"}
     assert len(data["media_player"]) == 1
 
@@ -285,7 +292,7 @@ def test_reference_villa_media_player_maps_every_requested_field():
     assert commands["volume_set"] == {
         "action": "light.turn_on",
         "target": {"entity_id": "light.audio_absolut_volume"},
-        "data": {"brightness_pct": "{{ (volume_level * 100) | round(0) }}"},
+        "data": {"brightness_pct": "{{ [0, [100, (volume_level * 100) | round(0)] | min] | max }}"},
     }
     assert commands["select_source"] == {
         "action": "number.set_value",
@@ -295,7 +302,7 @@ def test_reference_villa_media_player_maps_every_requested_field():
 
     assert media_player.attributes == {
         "is_volume_muted": "switch.audio_mute",
-        "volume_level": "light.audio_absolut_volume|brightness",
+        "volume_level": "sensor.villa_a1_audio_volume",
         "media_title": "sensor.audio_track_name",
         "source": "number.audio_playlist_select",
     }
@@ -305,6 +312,36 @@ def test_reference_villa_media_player_maps_every_requested_field():
     # media_player state.
     assert "switch.audio_power" in media_player.state_template
     assert "switch.audio_play_pause" in media_player.state_template
+
+
+def test_reference_villa_volume_level_sensor():
+    package = _build()
+
+    assert len(package.template_sensors) == 1
+    sensor = package.template_sensors[0]
+    assert sensor.unique_id == "villa_a1_audio_volume"
+    assert sensor.name == "Villa A1 Audio Volume"
+    assert "light.audio_absolut_volume" in sensor.state
+    assert "brightness" in sensor.state
+    assert "255" in sensor.state
+
+
+def test_reference_villa_volume_level_sensor_yaml_structure():
+    package = _build()
+
+    data = yaml.safe_load(package_to_yaml(package))
+
+    assert data["template"] == [
+        {
+            "sensor": [
+                {
+                    "name": "Villa A1 Audio Volume",
+                    "unique_id": "villa_a1_audio_volume",
+                    "state": package.template_sensors[0].state,
+                }
+            ]
+        }
+    ]
 
 
 def test_reference_villa_dashboard_has_a_media_control_card_for_the_media_player():

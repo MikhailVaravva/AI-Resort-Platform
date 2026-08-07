@@ -50,6 +50,11 @@ _SCENE_CONTROL_DPT: tuple[int, int | None] = (18, 1)
 # DPT number with brightness (5.1). Verified against the reference project.
 _LIGHT_DPTS: set[tuple[int, int | None]] = {(5, 1), (7, 600)}
 _SWITCH_DPT_MAIN = 1
+# DPST-11-1 "date" - has its own dedicated KNX platform (`date:`), not
+# `sensor` (DPT main-type 11 doesn't appear in the sensor "Value types"
+# table at all). Verified against the reference project and the official
+# KNX integration documentation (home-assistant.io/integrations/knx/).
+_DATE_DPT: tuple[int, int | None] = (11, 1)
 
 # Home Assistant KNX `sensor.type` identifiers ("Value types" table,
 # home-assistant.io/integrations/knx/) for the DPTs this builder's sensor
@@ -84,6 +89,7 @@ _DASHBOARD_SECTIONS = (
     ("switch", "Switches"),
     ("binary_sensor", "Binary Sensors"),
     ("sensor", "Sensors"),
+    ("date", "Dates"),
 )
 
 
@@ -329,23 +335,49 @@ def _build_entities_for(
         return entities
 
     if len(dpts) == 1:
-        key, roles = next(iter(dpts.items()))
-        if key[0] == _SWITCH_DPT_MAIN:
-            if "command" in roles:
-                config = {"address": roles["command"].address}
-                if "status" in roles:
-                    config["state_address"] = roles["status"].address
-                return [HaEntity(domain="switch", unique_id=base_id, name=name, config=config)]
-            return [
-                HaEntity(
-                    domain="binary_sensor",
-                    unique_id=base_id,
-                    name=name,
-                    config={"state_address": roles["status"].address},
-                )
-            ]
+        (key,) = dpts
+        if key == _DATE_DPT:
+            return [_build_date(base_id, name, dpts[key])]
+
+    # A command GA and its status GA sometimes use different DPT-1
+    # sub-types (e.g. command DPST-1-10 "start", status DPST-1-1
+    # "switch") - grouped separately by (dpt_main, dpt_sub) above, but
+    # still the same physical switch. Verified against the reference
+    # project ("Audio Play/Pause": command 1.010, status 1.001). Merge
+    # whenever every key here is DPT main-type 1 and there's at most one
+    # command and one status total - DPT 1.x has no valid `sensor.type`
+    # (see _DPT_LABELS), so this is the only way such a pair can become
+    # valid HA KNX config at all, not just a cosmetic grouping choice.
+    switch_main_keys = {k for k in dpts if k[0] == _SWITCH_DPT_MAIN}
+    if switch_main_keys == set(dpts):
+        commands = [roles["command"] for roles in dpts.values() if "command" in roles]
+        statuses = [roles["status"] for roles in dpts.values() if "status" in roles]
+        if len(commands) <= 1 and len(statuses) <= 1:
+            switch_config: dict[str, str] = {}
+            if commands:
+                switch_config["address"] = commands[0].address
+            if statuses:
+                switch_config["state_address"] = statuses[0].address
+            domain = "switch" if commands else "binary_sensor"
+            return [HaEntity(domain=domain, unique_id=base_id, name=name, config=switch_config)]
 
     return _sensor_fallback(base_id, name, dpts)
+
+
+def _build_date(base_id: str, name: str, roles: dict[str, GroupAddress]) -> HaEntity:
+    """DPST-11-1 as the KNX `date` platform: `address` is required (where
+    new values are sent), `state_address` optional (read back from the
+    bus) - per the official documentation. Falls back to using a
+    status-only group address as `address` if that's the only one
+    available, since the platform requires it."""
+    config: dict[str, str] = {}
+    if "command" in roles:
+        config["address"] = roles["command"].address
+        if "status" in roles:
+            config["state_address"] = roles["status"].address
+    else:
+        config["address"] = roles["status"].address
+    return HaEntity(domain="date", unique_id=base_id, name=name, config=config)
 
 
 def _light_config(

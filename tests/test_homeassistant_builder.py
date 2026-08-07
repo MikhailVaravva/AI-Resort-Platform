@@ -53,6 +53,19 @@ def test_scaling_dpt_not_used_as_brightness_stays_a_sensor():
     assert package.entities[0].config == {"type": "pulse", "state_address": "1/1/243"}
 
 
+def test_date_dpt_becomes_the_date_platform_not_a_sensor():
+    """DPST-11-1 has no valid HA KNX sensor.type (DPT main-type 11 isn't in
+    the documented Value types table) - it has its own dedicated `date`
+    platform instead."""
+    gas = (GroupAddress(id="1", address="1/1/42", name="A1 Date", dpt_main=11, dpt_sub=1),)
+
+    package = build_package(_project(gas))
+
+    assert len(package.entities) == 1
+    assert package.entities[0].domain == "date"
+    assert package.entities[0].config == {"address": "1/1/42"}
+
+
 def test_plain_switch_is_not_a_light():
     gas = (GroupAddress(id="1", address="1/1/20", name="A1 Stone Power", dpt_main=1, dpt_sub=1),)
 
@@ -115,6 +128,27 @@ def test_command_and_status_with_mismatched_wording_still_merge():
 
 def test_multi_dpt_non_light_entity_fans_out_to_one_sensor_per_dpt():
     gas = (
+        GroupAddress(id="1", address="1/1/40", name="A1 Multi Sensor", dpt_main=9, dpt_sub=1),
+        GroupAddress(
+            id="2", address="1/1/41", name="A1 Multi Sensor status", dpt_main=9, dpt_sub=7
+        ),
+    )
+    package = build_package(_project(gas))
+
+    assert len(package.entities) == 2
+    assert all(e.domain == "sensor" for e in package.entities)
+    types = {e.config["type"] for e in package.entities}
+    assert types == {"temperature", "humidity"}
+
+
+def test_command_and_status_sharing_different_dpt1_subtypes_merge_into_one_switch():
+    """DPT main-type 1 has no valid HA KNX `sensor.type` at all (see
+    homeassistant/builder.py:_DPT_LABELS), so a command/status pair that
+    happens to use different DPT-1 sub-types (verified against the
+    reference project: "Audio Play/Pause" command is DPST-1-10 "start",
+    its status is DPST-1-1 "switch") must still merge into one `switch`
+    entity - otherwise it can only become invalid HA config."""
+    gas = (
         GroupAddress(id="1", address="1/1/222", name="A1 Audio Play/Pause", dpt_main=1, dpt_sub=10),
         GroupAddress(
             id="2", address="1/1/223", name="A1 Audio Play/Pause status", dpt_main=1, dpt_sub=1
@@ -122,17 +156,9 @@ def test_multi_dpt_non_light_entity_fans_out_to_one_sensor_per_dpt():
     )
     package = build_package(_project(gas))
 
-    assert len(package.entities) == 2
-    assert all(e.domain == "sensor" for e in package.entities)
-    ids = {e.unique_id for e in package.entities}
-    # DPT main-type 1 has no valid HA KNX sensor.type at all (see
-    # homeassistant/builder.py:_DPT_LABELS) - both fall back to the numeric
-    # label. These two entities are not valid HA config as `sensor`; fixing
-    # that requires a domain change, out of scope for this grouping test.
-    assert ids == {
-        "hot_stone_villa_audio_play_pause_1_10",
-        "hot_stone_villa_audio_play_pause_1_1",
-    }
+    assert len(package.entities) == 1
+    assert package.entities[0].domain == "switch"
+    assert package.entities[0].config == {"address": "1/1/222", "state_address": "1/1/223"}
 
 
 def test_no_unique_id_collisions():

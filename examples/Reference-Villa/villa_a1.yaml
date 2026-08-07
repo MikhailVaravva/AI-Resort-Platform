@@ -69,6 +69,9 @@ knx:
   - name: Audio Mute
     address: 1/1/220
     state_address: 1/1/221
+  - name: Audio Play/Pause
+    address: 1/1/222
+    state_address: 1/1/223
   - name: Audio Next/Prev
     address: 1/1/226
   - name: Audio Power Convert
@@ -81,15 +84,6 @@ knx:
   - name: Humidity
     type: humidity
     state_address: 1/1/41
-  - name: Date
-    type: '11.1'
-    state_address: 1/1/42
-  - name: Audio Play/Pause 1.10
-    type: '1.10'
-    state_address: 1/1/222
-  - name: Audio Play/Pause 1.1
-    type: '1.1'
-    state_address: 1/1/223
   - name: Audio Track name
     type: latin_1
     state_address: 1/1/231
@@ -99,6 +93,9 @@ knx:
   - name: Audio Play mode
     type: pulse
     state_address: 1/1/243
+  date:
+  - name: Date
+    address: 1/1/42
   scene:
   - name: Scene 1
     address: 1/1/150

@@ -36,7 +36,7 @@ def test_reference_villa_domain_distribution():
     package = _build()
 
     counts = collections.Counter(e.domain for e in package.entities)
-    assert counts == {"switch": 12, "light": 13, "sensor": 8, "cover": 1}
+    assert counts == {"switch": 13, "light": 13, "sensor": 5, "cover": 1, "date": 1}
 
 
 def test_reference_villa_no_unique_id_collisions():
@@ -114,7 +114,7 @@ def test_reference_villa_package_yaml_round_trips_via_existing_generator():
     data = yaml.safe_load(package_to_yaml(package))
 
     assert set(data.keys()) == {"knx", "script"}
-    assert set(data["knx"].keys()) == {"switch", "light", "sensor", "cover", "scene"}
+    assert set(data["knx"].keys()) == {"switch", "light", "sensor", "cover", "scene", "date"}
     assert len(data["knx"]["light"]) == 13
     assert len(data["knx"]["scene"]) == 6
     assert len(data["script"]) == 6
@@ -146,7 +146,7 @@ def test_reference_villa_dashboard_covers_every_domain_present():
     view = dashboard.views[0]
     card_titles = {c.title for c in view.cards}
 
-    assert card_titles == {"Lights", "Sensors", "Switches", "Covers", "Scenes", "Scripts"}
+    assert card_titles == {"Lights", "Sensors", "Switches", "Covers", "Scenes", "Scripts", "Dates"}
 
     total_entities_in_cards = sum(len(c.entities) for c in view.cards)
     assert total_entities_in_cards == len(package.entities) + len(package.scenes) + len(

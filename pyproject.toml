@@ -7,7 +7,9 @@ name = "ai-resort-platform"
 version = "0.1.0"
 description = "Reference Villa -> Digital Twin -> Clone Engine -> Deployment for a KNX villa resort."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pyyaml>=6.0",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -15,6 +17,7 @@ dev = [
     "ruff>=0.6",
     "black>=24",
     "mypy>=1.11",
+    "types-PyYAML",
 ]
 
 [project.scripts]

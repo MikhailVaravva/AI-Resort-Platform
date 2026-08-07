@@ -97,9 +97,46 @@ def build_package(project: ETSProject) -> HomeAssistantPackage:
     builder, which scoped ids per-villa/per-room. Falls back to the project
     name if the project has no rooms.
     """
+    return _build_package(project, project.group_addresses)
+
+
+# The BAB Audio Module device's own name in the reference project - the only
+# reliable way to find it. Its `manufacturer`/`hardware_name`/`order_number`
+# ("BAB TECHNOLOGIE GmbH"/"Module"/"0001") are identical to the DMX module's
+# (verified against the reference project), so only the device name
+# distinguishes them.
+_AUDIO_MODULE_DEVICE_NAME = "Audio Module A1"
+
+
+def build_audio_module_package(project: ETSProject) -> HomeAssistantPackage:
+    """Build a HomeAssistantPackage covering only the group addresses wired
+    to the BAB Audio Module device, so it can be tested in Home Assistant on
+    its own.
+
+    A group address "belongs to" the module if it's linked to one of the
+    module's own communication objects (`Device.communication_object_ids`) -
+    not by name-matching "Audio" in the group address name. That distinction
+    matters here: several "Audio ..." group addresses (e.g. "Audio Volume
+    status", "Audio Mute status", "Audio Play mode") are verified to be
+    wired only to the KNX Smart Touch S3 touch panel's own communication
+    objects, not the module's - they're the panel's own derived/mirrored
+    values, not something the module itself sends or receives, so they're
+    excluded here.
+    """
+    device = project.device(_AUDIO_MODULE_DEVICE_NAME)
+    device_co_ids = set(device.communication_object_ids)
+    group_addresses = tuple(
+        ga for ga in project.group_addresses if device_co_ids & set(ga.communication_object_ids)
+    )
+    return _build_package(project, group_addresses)
+
+
+def _build_package(
+    project: ETSProject, group_addresses: tuple[GroupAddress, ...]
+) -> HomeAssistantPackage:
     villa_name = project.rooms[0].name if project.rooms else project.name
     slug = _slugify(villa_name)
-    cover_source, after_cover = _extract_cover_group_addresses(project.group_addresses)
+    cover_source, after_cover = _extract_cover_group_addresses(group_addresses)
     scenes, scripts, remaining = _extract_scenes(slug, after_cover)
 
     entities: list[HaEntity] = []

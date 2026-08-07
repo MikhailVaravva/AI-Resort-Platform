@@ -13,7 +13,11 @@ from ai_resort_platform.generators.ha_yaml import (
     write_dashboard,
     write_package,
 )
-from ai_resort_platform.homeassistant.builder import build_dashboard, build_package
+from ai_resort_platform.homeassistant.builder import (
+    build_audio_module_package,
+    build_dashboard,
+    build_package,
+)
 
 REFERENCE_VILLA = (
     Path(__file__).resolve().parent.parent
@@ -167,3 +171,42 @@ def test_reference_villa_writes_a_dashboard_file(tmp_path):
     write_dashboard(dashboard, path)
 
     assert yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def test_reference_villa_audio_module_package_excludes_touch_panel_mirrors():
+    """Verified against the real reference project: the BAB Audio Module
+    (device "Audio Module A1") only owns 8 of the ~15 "Audio ..." group
+    addresses - the rest (e.g. "Audio Volume status", "Audio Mute status",
+    "Audio Play mode") are wired solely to the KNX Smart Touch S3 touch
+    panel's own communication objects, not the module's."""
+    project = ETSProject.open(REFERENCE_VILLA, password="12345")
+
+    package = build_audio_module_package(project)
+
+    by_id = {e.unique_id: e for e in package.entities}
+    assert set(by_id) == {
+        "villa_a1_audio_power",
+        "villa_a1_audio_absolut_volume",
+        "villa_a1_audio_mute",
+        "villa_a1_audio_play_pause",
+        "villa_a1_audio_next_prev",
+        "villa_a1_audio_track_name_string88591",
+        "villa_a1_audio_playlist_select_major_5_x",
+    }
+    assert by_id["villa_a1_audio_power"].config == {
+        "address": "1/1/202",
+        "state_address": "1/1/203",
+    }
+    # Wired only to the touch panel in the real project, so no state_address
+    # is available on the module-scoped package for these:
+    assert by_id["villa_a1_audio_mute"].config == {"address": "1/1/220"}
+    assert by_id["villa_a1_audio_play_pause"].config == {"address": "1/1/222"}
+
+
+def test_reference_villa_audio_module_package_yaml_round_trips():
+    project = ETSProject.open(REFERENCE_VILLA, password="12345")
+    package = build_audio_module_package(project)
+
+    data = yaml.safe_load(package_to_yaml(package))
+
+    assert set(data.keys()) == {"switch", "light", "sensor"}

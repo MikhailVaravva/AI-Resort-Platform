@@ -1,7 +1,12 @@
+from ai_resort_platform.ets.devices import Device
 from ai_resort_platform.ets.group_addresses import GroupAddress
 from ai_resort_platform.ets.project import ETSProject
 from ai_resort_platform.ets.rooms import Room
-from ai_resort_platform.homeassistant.builder import build_dashboard, build_package
+from ai_resort_platform.homeassistant.builder import (
+    build_audio_module_package,
+    build_dashboard,
+    build_package,
+)
 
 
 def _project(group_addresses: tuple[GroupAddress, ...]) -> ETSProject:
@@ -235,3 +240,51 @@ def test_scene_control_without_matching_scenes_produces_nothing():
     assert package.scenes == ()
     assert package.scripts == ()
     assert package.entities == ()
+
+
+def test_audio_module_package_only_includes_group_addresses_wired_to_the_module():
+    """A group address belongs to the module because it shares one of the
+    module's own communication objects - not because its name contains
+    "Audio". "Audio Mute status" here is wired only to a different device
+    (mirroring the real reference project's touch panel), so it must not
+    appear."""
+    audio_module = Device(
+        individual_address="1.1.5",
+        name="Audio Module A1",
+        communication_object_ids=("1.1.5/O-1",),
+    )
+    touch_panel = Device(
+        individual_address="1.1.4",
+        name="KNX Smart Touch S3",
+        communication_object_ids=("1.1.4/O-9",),
+    )
+    gas = (
+        GroupAddress(
+            id="1",
+            address="1/1/220",
+            name="A1 Audio Mute",
+            dpt_main=1,
+            dpt_sub=3,
+            communication_object_ids=("1.1.5/O-1",),
+        ),
+        GroupAddress(
+            id="2",
+            address="1/1/221",
+            name="A1 Audio Mute status",
+            dpt_main=1,
+            dpt_sub=3,
+            communication_object_ids=("1.1.4/O-9",),
+        ),
+    )
+    project = ETSProject(
+        name="Hot Stone VILLA",
+        guid="guid-1",
+        tool_version="6.4.0",
+        devices=(audio_module, touch_panel),
+        group_addresses=gas,
+    )
+
+    package = build_audio_module_package(project)
+
+    assert len(package.entities) == 1
+    assert package.entities[0].config == {"address": "1/1/220"}

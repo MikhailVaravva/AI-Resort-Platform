@@ -66,6 +66,37 @@ def test_date_dpt_becomes_the_date_platform_not_a_sensor():
     assert package.entities[0].config == {"address": "1/1/42"}
 
 
+def test_command_only_dpst_1_7_becomes_a_button_not_a_switch():
+    """DPST-1-7 "step" is a momentary directional pulse, not a persistent
+    on/off state - a device receiving it performs one step and doesn't
+    "stay" in the sent value. No sensor.type exists for DPT main-type 1
+    either (see _DPT_LABELS), so `button` is the only valid domain."""
+    gas = (GroupAddress(id="1", address="1/1/226", name="A1 Step", dpt_main=1, dpt_sub=7),)
+
+    package = build_package(_project(gas))
+
+    assert len(package.entities) == 1
+    assert package.entities[0].domain == "button"
+    assert package.entities[0].config == {"address": "1/1/226"}
+
+
+def test_dpst_1_7_with_a_status_ga_stays_a_switch():
+    """If a DPST-1-7 point ever DID have real status feedback, that would
+    mean it behaves as a persistent state after all - the switch-merge
+    path (see _build_entities_for) should still win over the button
+    reclassification."""
+    gas = (
+        GroupAddress(id="1", address="1/1/226", name="A1 Step", dpt_main=1, dpt_sub=7),
+        GroupAddress(id="2", address="1/1/227", name="A1 Step status", dpt_main=1, dpt_sub=7),
+    )
+
+    package = build_package(_project(gas))
+
+    assert len(package.entities) == 1
+    assert package.entities[0].domain == "switch"
+    assert package.entities[0].config == {"address": "1/1/226", "state_address": "1/1/227"}
+
+
 def test_plain_switch_is_not_a_light():
     gas = (GroupAddress(id="1", address="1/1/20", name="A1 Stone Power", dpt_main=1, dpt_sub=1),)
 
@@ -222,8 +253,11 @@ def test_build_dashboard_groups_entities_by_domain():
     view = dashboard.views[0]
     assert view.title == "Hot Stone VILLA"
     cards_by_title = {c.title: c for c in view.cards}
-    assert cards_by_title["Lights"].entities == ("light.hot_stone_villa_g1",)
-    assert cards_by_title["Switches"].entities == ("switch.hot_stone_villa_stone_power",)
+    # Real HA entity_ids, derived from `name` alone (not our internal,
+    # villa-prefixed unique_id - unique_id isn't a supported KNX option,
+    # see generators/ha_yaml.py).
+    assert cards_by_title["Lights"].entities == ("light.g1",)
+    assert cards_by_title["Switches"].entities == ("switch.stone_power",)
 
 
 def test_scenes_produce_scene_entity_and_activation_script():
@@ -322,3 +356,102 @@ def test_audio_module_package_only_includes_group_addresses_wired_to_the_module(
 
     assert len(package.entities) == 1
     assert package.entities[0].config == {"address": "1/1/220"}
+
+
+def _audio_module_gas() -> tuple[GroupAddress, ...]:
+    return (
+        GroupAddress(id="1", address="1/1/202", name="A1 Audio Power", dpt_main=1, dpt_sub=1),
+        GroupAddress(id="2", address="1/1/222", name="A1 Audio Play/Pause", dpt_main=1, dpt_sub=10),
+        GroupAddress(id="3", address="1/1/226", name="A1 Audio Next/Prev", dpt_main=1, dpt_sub=7),
+        GroupAddress(
+            id="4", address="1/1/211", name="A1 Audio Absolut volume", dpt_main=5, dpt_sub=1
+        ),
+        GroupAddress(id="5", address="1/1/220", name="A1 Audio Mute", dpt_main=1, dpt_sub=3),
+        GroupAddress(id="6", address="1/1/231", name="A1 Audio Track name", dpt_main=16, dpt_sub=1),
+        GroupAddress(
+            id="7", address="1/1/239", name="A1 Audio Playlist Select", dpt_main=5, dpt_sub=None
+        ),
+    )
+
+
+def test_audio_module_semantics_reclassify_volume_and_playlist_entities():
+    """ "Audio Absolut volume" and "Audio Playlist Select" are both wired
+    to genuinely read/write communication objects (verified against the
+    reference project), not status-only readouts - so they become a
+    writable `light` (borrowing "Audio Power"'s address, since `light`
+    requires one) and a writable `number`, not read-only `sensor`."""
+    package = build_package(_project(_audio_module_gas()))
+    by_name = {e.name: e for e in package.entities}
+
+    volume = by_name["Audio Absolut volume"]
+    assert volume.domain == "light"
+    assert volume.config == {"address": "1/1/202", "brightness_address": "1/1/211"}
+
+    playlist = by_name["Audio Playlist Select"]
+    assert playlist.domain == "number"
+    assert playlist.config == {"address": "1/1/239", "type": "1byte_unsigned"}
+
+    next_track = by_name["Audio Next/Prev"]
+    assert next_track.domain == "button"
+
+
+def test_media_player_is_built_when_every_source_entity_is_present():
+    package = build_package(_project(_audio_module_gas()))
+
+    assert len(package.media_players) == 1
+    media_player = package.media_players[0]
+    assert media_player.unique_id == "hot_stone_villa_audio_module"
+    assert media_player.name == "Hot Stone VILLA Audio"
+    assert media_player.commands == {
+        "turn_on": {"action": "switch.turn_on", "target": {"entity_id": "switch.audio_power"}},
+        "turn_off": {"action": "switch.turn_off", "target": {"entity_id": "switch.audio_power"}},
+        "media_play": {
+            "action": "switch.turn_on",
+            "target": {"entity_id": "switch.audio_play_pause"},
+        },
+        "media_pause": {
+            "action": "switch.turn_off",
+            "target": {"entity_id": "switch.audio_play_pause"},
+        },
+        # "Audio Next/Prev" is a `button` (DPST-1-7 "step" is a momentary
+        # pulse, not a persistent switch state - see _TRIGGER_DPTS).
+        "media_next_track": {
+            "action": "button.press",
+            "target": {"entity_id": "button.audio_next_prev"},
+        },
+        "volume_mute": {
+            "action": "switch.toggle",
+            "target": {"entity_id": "switch.audio_mute"},
+        },
+        # "Audio Absolut volume" is rebuilt as a `light` (see
+        # _apply_audio_module_semantics) so this can actually write, not
+        # just observe.
+        "volume_set": {
+            "action": "light.turn_on",
+            "target": {"entity_id": "light.audio_absolut_volume"},
+            "data": {"brightness_pct": "{{ (volume_level * 100) | round(0) }}"},
+        },
+        # "Audio Playlist Select" is rebuilt as a `number` (writable).
+        "select_source": {
+            "action": "number.set_value",
+            "target": {"entity_id": "number.audio_playlist_select"},
+            "data": {"value": "{{ source }}"},
+        },
+    }
+    assert media_player.attributes == {
+        "is_volume_muted": "switch.audio_mute",
+        "volume_level": "light.audio_absolut_volume|brightness",
+        "media_title": "sensor.audio_track_name",
+        "source": "number.audio_playlist_select",
+    }
+    assert "state" not in media_player.attributes
+    assert "switch.audio_power" in media_player.state_template
+    assert "switch.audio_play_pause" in media_player.state_template
+
+
+def test_media_player_is_not_built_when_a_source_entity_is_missing():
+    gas = tuple(ga for ga in _audio_module_gas() if ga.name != "A1 Audio Mute")
+
+    package = build_package(_project(gas))
+
+    assert package.media_players == ()

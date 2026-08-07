@@ -5,6 +5,7 @@ from ai_resort_platform.generators.ha_package import (
     DashboardCard,
     DashboardView,
     HaEntity,
+    HaMediaPlayer,
     HaScene,
     HaScript,
     HomeAssistantPackage,
@@ -95,6 +96,71 @@ def test_package_to_yaml_script_is_a_mapping_keyed_by_unique_id():
     }
 
 
+def test_package_to_yaml_media_player_uses_the_universal_platform():
+    """The KNX integration has no media_player platform of its own, so this
+    is core HA config (home-assistant.io/integrations/universal/) - not
+    nested under `knx:`, unlike every KNX-platform domain above."""
+    package = HomeAssistantPackage(
+        villa_id="v-1",
+        villa_name="Villa X1",
+        media_players=(
+            HaMediaPlayer(
+                unique_id="villa_x1_audio_module",
+                name="Audio Module",
+                commands={
+                    "turn_on": {
+                        "action": "switch.turn_on",
+                        "target": {"entity_id": "switch.audio_power"},
+                    }
+                },
+                attributes={"state": "switch.audio_play_pause"},
+            ),
+        ),
+    )
+
+    data = yaml.safe_load(package_to_yaml(package))
+
+    assert data["media_player"] == [
+        {
+            "platform": "universal",
+            "name": "Audio Module",
+            "unique_id": "villa_x1_audio_module",
+            "commands": {
+                "turn_on": {
+                    "action": "switch.turn_on",
+                    "target": {"entity_id": "switch.audio_power"},
+                }
+            },
+            "attributes": {"state": "switch.audio_play_pause"},
+        }
+    ]
+    assert "media_player" not in data.get("knx", {})
+
+
+def test_package_to_yaml_media_player_state_template():
+    """The documented alternative to attributes["state"] for a state that
+    depends on more than one entity."""
+    package = HomeAssistantPackage(
+        villa_id="v-1",
+        villa_name="Villa X1",
+        media_players=(
+            HaMediaPlayer(
+                unique_id="villa_x1_audio_module",
+                name="Villa X1 Audio",
+                state_template="{% if is_state('switch.power', 'off') %}off{% endif %}",
+            ),
+        ),
+    )
+
+    data = yaml.safe_load(package_to_yaml(package))
+
+    assert (
+        data["media_player"][0]["state_template"]
+        == "{% if is_state('switch.power', 'off') %}off{% endif %}"
+    )
+    assert "state_template" not in data["media_player"][0]["attributes"]
+
+
 def test_package_to_yaml_omits_empty_sections():
     package = HomeAssistantPackage(villa_id="v-1", villa_name="Villa X1")
 
@@ -133,6 +199,34 @@ def test_dashboard_to_yaml_structure():
         "type": "entities",
         "title": "Lights",
         "entities": ["light.villa_x1_g1"],
+    }
+
+
+def test_dashboard_to_yaml_media_control_card():
+    """The documented Lovelace card for a media_player entity - a
+    single-entity card, unlike the "entities" list cards above."""
+    dashboard = Dashboard(
+        villa_id="v-1",
+        title="Villa X1",
+        views=(
+            DashboardView(
+                title="Villa X1",
+                cards=(
+                    DashboardCard(
+                        title="Audio Module",
+                        card_type="media-control",
+                        entity="media_player.audio_module",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    data = yaml.safe_load(dashboard_to_yaml(dashboard))
+
+    assert data["views"][0]["cards"][0] == {
+        "type": "media-control",
+        "entity": "media_player.audio_module",
     }
 
 

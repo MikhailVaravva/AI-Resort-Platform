@@ -24,6 +24,7 @@ from ai_resort_platform.generators.ha_package import (
     DashboardCard,
     DashboardView,
     HaEntity,
+    HaMediaPlayer,
     HaScene,
     HaScript,
     HomeAssistantPackage,
@@ -55,6 +56,20 @@ _SWITCH_DPT_MAIN = 1
 # table at all). Verified against the reference project and the official
 # KNX integration documentation (home-assistant.io/integrations/knx/).
 _DATE_DPT: tuple[int, int | None] = (11, 1)
+
+# DPST-1-7 "step" (increase/decrease) - a momentary directional pulse by
+# KNX specification, not a persistent on/off state: a device receiving it
+# performs one step and does not "stay" in the sent value the way a real
+# switch does. Modeled as `button` (a stateless, single-press KNX
+# platform) rather than `switch`, but only when the group address is
+# command-only (no status GA at all) - if a device ever DID report a
+# genuine status back for a DPST-1-7 point, that would mean it behaves as
+# a persistent state after all, and the switch-merge logic above should
+# handle it instead. Verified against the reference project: "Curtain
+# Stop" (handled separately by _build_cover, before this ever runs) and
+# "Audio Next/Prev" are the only DPST-1-7 group addresses, and neither has
+# a status counterpart.
+_TRIGGER_DPTS: set[tuple[int, int | None]] = {(1, 7)}
 
 # Home Assistant KNX `sensor.type` identifiers ("Value types" table,
 # home-assistant.io/integrations/knx/) for the DPTs this builder's sensor
@@ -90,12 +105,24 @@ _DASHBOARD_SECTIONS = (
     ("binary_sensor", "Binary Sensors"),
     ("sensor", "Sensors"),
     ("date", "Dates"),
+    ("number", "Numbers"),
+    ("button", "Buttons"),
 )
 
 
 def _slugify(text: str) -> str:
     slug = _SLUG_INVALID.sub("_", text.lower()).strip("_")
     return slug or "entity"
+
+
+def _entity_id(entity: HaEntity) -> str:
+    """The `entity_id` Home Assistant actually assigns a KNX-platform
+    entity: since `unique_id` isn't a supported KNX option (see
+    generators/ha_yaml.py), HA derives it from `name` alone, not from our
+    own internal `HaEntity.unique_id` - verified against a real running
+    Home Assistant instance (e.g. "Audio Power" -> switch.audio_power, not
+    switch.villa_a1_audio_power)."""
+    return f"{entity.domain}.{_slugify(entity.name)}"
 
 
 def build_package(project: ETSProject) -> HomeAssistantPackage:
@@ -155,12 +182,175 @@ def _build_package(
     for entity_key, name, dpts in _group_addresses(remaining):
         entities.extend(_build_entities_for(slug, entity_key, name, dpts))
 
+    entities = list(_apply_audio_module_semantics(tuple(entities)))
+    media_player = _build_audio_media_player(slug, villa_name, tuple(entities))
+
     return HomeAssistantPackage(
         villa_id=project.guid,
         villa_name=villa_name,
         entities=tuple(entities),
         scenes=scenes,
         scripts=scripts,
+        media_players=(media_player,) if media_player else (),
+    )
+
+
+def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEntity, ...]:
+    """Two of the audio module's entities need a different domain than the
+    generic classification gives them, based on their real KNX behaviour
+    (verified against the reference project's communication objects, not
+    just DPT numbers) - scoped to exactly these two, by name, so nothing
+    else's classification changes (e.g. the DMX channels have the same
+    structural shape - a single command-role DPT 5 key - but are out of
+    scope here):
+
+    - "Audio Absolut volume" (DPT 5.001) has no DPT-1.x switch of its own,
+      so the generic pipeline exposes it as a read-only `sensor` (see
+      _build_entities_for) - but its communication object is genuinely
+      read/write (verified), a continuously controllable level with
+      nothing to switch, not a status readout. Rebuilt as a `light`
+      instead: `address` is required by that platform regardless, so it
+      borrows "Audio Power"'s (the same physical module, already a
+      command target) to satisfy it, while `brightness_address` is the
+      real, writable volume value - the point of this change is to make
+      volume actually controllable, not just observable.
+    - "Audio Playlist Select" (DPT 5, no sub-type) is wired to the exact
+      same communication object as "Audio Absolut volume" (verified:
+      identical read/write/communication/transmit flags) - a real,
+      writable command target, not a status readout - so it becomes a
+      `number` (writable) instead of a read-only `sensor`.
+    """
+    power = next((e for e in entities if e.name == "Audio Power"), None)
+    if power is None:
+        return entities
+
+    result = []
+    for entity in entities:
+        if entity.name == "Audio Absolut volume" and entity.domain == "sensor":
+            result.append(
+                HaEntity(
+                    domain="light",
+                    unique_id=entity.unique_id,
+                    name=entity.name,
+                    config={
+                        "address": power.config["address"],
+                        "brightness_address": entity.config["state_address"],
+                    },
+                )
+            )
+        elif entity.name == "Audio Playlist Select" and entity.domain == "sensor":
+            result.append(
+                HaEntity(
+                    domain="number",
+                    unique_id=entity.unique_id,
+                    name=entity.name,
+                    config={
+                        "address": entity.config["state_address"],
+                        "type": entity.config["type"],
+                    },
+                )
+            )
+        else:
+            result.append(entity)
+    return tuple(result)
+
+
+def _build_audio_media_player(
+    slug: str, villa_name: str, entities: tuple[HaEntity, ...]
+) -> HaMediaPlayer | None:
+    """One `media_player` for the BAB Audio Module, composed entirely from
+    entities `_build_package` already built for it (matched by `name`) -
+    the KNX integration has no media_player platform of its own, and
+    nothing here is re-derived from group addresses. Returns None if this
+    project doesn't have all seven required source entities (e.g. no
+    audio module wired up at all).
+    """
+    by_name = {e.name: e for e in entities}
+    power = by_name.get("Audio Power")
+    play_pause = by_name.get("Audio Play/Pause")
+    next_track = by_name.get("Audio Next/Prev")
+    volume = by_name.get("Audio Absolut volume")
+    mute = by_name.get("Audio Mute")
+    title = by_name.get("Audio Track name")
+    playlist = by_name.get("Audio Playlist Select")
+    if not (power and play_pause and next_track and volume and mute and title and playlist):
+        return None
+
+    def service(
+        action: str, target: HaEntity, data: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        call: dict[str, object] = {"action": action, "target": {"entity_id": _entity_id(target)}}
+        if data:
+            call["data"] = data
+        return call
+
+    return HaMediaPlayer(
+        unique_id=f"{slug}_audio_module",
+        name=f"{villa_name} Audio",
+        commands={
+            "turn_on": service("switch.turn_on", power),
+            "turn_off": service("switch.turn_off", power),
+            "media_play": service("switch.turn_on", play_pause),
+            "media_pause": service("switch.turn_off", play_pause),
+            # DPST-1-7 "step": a momentary pulse (see _TRIGGER_DPTS), not a
+            # persistent state - modeled as a `button`, pressed via the
+            # core button.press service. Value 1 (the button's default
+            # payload) conventionally means "increase"; the source project
+            # has no separate "previous" group address to map a
+            # previous-track command to.
+            "media_next_track": service("button.press", next_track),
+            "volume_mute": service("switch.toggle", mute),
+            # "Audio Absolut volume" is rebuilt as a `light` (see
+            # _apply_audio_module_semantics) specifically so this can be a
+            # real write, not just a display - light.turn_on's
+            # brightness_pct (0-100) is the volume percentage HA's
+            # 0.0-1.0 volume_level maps onto directly.
+            "volume_set": service(
+                "light.turn_on",
+                volume,
+                {"brightness_pct": "{{ (volume_level * 100) | round(0) }}"},
+            ),
+            # "Audio Playlist Select" is rebuilt as a `number` (see
+            # _apply_audio_module_semantics) so this can write the
+            # requested source through, not just display the current one.
+            # There is no known name<->index mapping in the source
+            # project, so `source` is expected to be that raw numeric
+            # index as a string, not a friendly playlist name.
+            "select_source": service("number.set_value", playlist, {"value": "{{ source }}"}),
+        },
+        # Home Assistant's Universal Media Player cannot derive
+        # playing/idle/off from multiple entities without state_template.
+        # This is intentional.
+        #
+        # Neither "Audio Power" nor "Audio Play/Pause" alone gives a valid
+        # media_player state (their own state is just "on"/"off") - off
+        # vs idle vs playing depends on BOTH together, which the
+        # `universal` platform's plain attributes.state (a single bare
+        # entity reference, no logic) can't express - state_template is
+        # the documented mechanism for exactly this.
+        state_template=(
+            f"{{% if is_state('{_entity_id(power)}', 'off') %}}\n"
+            "  off\n"
+            f"{{% elif is_state('{_entity_id(play_pause)}', 'on') %}}\n"
+            "  playing\n"
+            "{% else %}\n"
+            "  idle\n"
+            "{% endif %}"
+        ),
+        attributes={
+            "is_volume_muted": _entity_id(mute),
+            # KNX `light.brightness` is HA's normalized 0-255 scale (xknx
+            # converts the DPT 5.001 0-100% value for us) - still not the
+            # exact 0.0-1.0 `volume_level` expects, since the `universal`
+            # platform's `attributes:` supports only a bare entity/
+            # attribute reference, no conversion. Documented limitation,
+            # not fixable without a value not covered by this mapping.
+            "volume_level": f"{_entity_id(volume)}|brightness",
+            "media_title": _entity_id(title),
+            # No `source_list` for the same reason: the project has no
+            # catalog of playlist names, only this numeric index.
+            "source": _entity_id(playlist),
+        },
     )
 
 
@@ -168,22 +358,32 @@ def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
     """Build a one-view overview dashboard for a villa's package."""
     cards = []
     for domain, title in _DASHBOARD_SECTIONS:
-        entity_ids = tuple(
-            f"{domain}.{e.unique_id}" for e in package.entities if e.domain == domain
-        )
+        entity_ids = tuple(_entity_id(e) for e in package.entities if e.domain == domain)
         if entity_ids:
             cards.append(DashboardCard(title=title, entities=entity_ids))
 
     if package.scenes:
         cards.append(
             DashboardCard(
-                title="Scenes", entities=tuple(f"scene.{s.unique_id}" for s in package.scenes)
+                title="Scenes",
+                entities=tuple(f"scene.{_slugify(s.name)}" for s in package.scenes),
             )
         )
     if package.scripts:
         cards.append(
             DashboardCard(
                 title="Scripts", entities=tuple(f"script.{s.unique_id}" for s in package.scripts)
+            )
+        )
+    for media_player in package.media_players:
+        # The documented Lovelace card for a media_player entity
+        # (home-assistant.io) - a single-entity card, not the generic
+        # "entities" list card the sections above use.
+        cards.append(
+            DashboardCard(
+                title=media_player.name,
+                card_type="media-control",
+                entity=f"media_player.{_slugify(media_player.name)}",
             )
         )
 
@@ -347,6 +547,9 @@ def _build_entities_for(
         (key,) = dpts
         if key == _DATE_DPT:
             return [_build_date(base_id, name, dpts[key])]
+        roles = dpts[key]
+        if key in _TRIGGER_DPTS and "command" in roles and "status" not in roles:
+            return [_build_button(base_id, name, roles["command"])]
 
     # A command GA and its status GA sometimes use different DPT-1
     # sub-types (e.g. command DPST-1-10 "start", status DPST-1-1
@@ -386,6 +589,14 @@ def _build_date(base_id: str, name: str, roles: dict[str, GroupAddress]) -> HaEn
     else:
         config["address"] = roles["status"].address
     return HaEntity(domain="date", unique_id=base_id, name=name, config=config)
+
+
+def _build_button(base_id: str, name: str, ga: GroupAddress) -> HaEntity:
+    """DPST-1-7 "step", command-only: the KNX `button` platform. `payload`
+    defaults to `1` (per the official documentation) - a single press
+    sends the "increase" direction, matching how this group address is
+    already used elsewhere (e.g. media_next_track)."""
+    return HaEntity(domain="button", unique_id=base_id, name=name, config={"address": ga.address})
 
 
 def _light_config(

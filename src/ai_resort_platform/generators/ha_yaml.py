@@ -3,7 +3,13 @@ from typing import Any
 
 import yaml
 
-from ai_resort_platform.generators.ha_package import Dashboard, HaEntity, HomeAssistantPackage
+from ai_resort_platform.generators.ha_package import (
+    Dashboard,
+    DashboardCard,
+    HaEntity,
+    HaMediaPlayer,
+    HomeAssistantPackage,
+)
 
 
 def package_to_yaml(package: HomeAssistantPackage) -> str:
@@ -48,6 +54,9 @@ def package_to_yaml(package: HomeAssistantPackage) -> str:
             for script in package.scripts
         }
 
+    if package.media_players:
+        data["media_player"] = [_media_player_dict(mp) for mp in package.media_players]
+
     if package.automations:
         data["automation"] = [
             {
@@ -65,6 +74,22 @@ def _entity_dict(entity: HaEntity) -> dict[str, Any]:
     return {"name": entity.name, **entity.config}
 
 
+def _media_player_dict(media_player: HaMediaPlayer) -> dict[str, Any]:
+    """`media_player: - platform: universal` (home-assistant.io/
+    integrations/universal/) - not a KNX platform, so this is a core HA
+    integration entry, not nested under `knx:`."""
+    data: dict[str, Any] = {
+        "platform": "universal",
+        "name": media_player.name,
+        "unique_id": media_player.unique_id,
+        "commands": media_player.commands,
+        "attributes": media_player.attributes,
+    }
+    if media_player.state_template:
+        data["state_template"] = media_player.state_template
+    return data
+
+
 def write_package(package: HomeAssistantPackage, path: Path) -> None:
     path.write_text(package_to_yaml(package), encoding="utf-8")
 
@@ -73,17 +98,17 @@ def dashboard_to_yaml(dashboard: Dashboard) -> str:
     data = {
         "title": dashboard.title,
         "views": [
-            {
-                "title": view.title,
-                "cards": [
-                    {"type": "entities", "title": card.title, "entities": list(card.entities)}
-                    for card in view.cards
-                ],
-            }
+            {"title": view.title, "cards": [_card_dict(card) for card in view.cards]}
             for view in dashboard.views
         ],
     }
     return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+
+def _card_dict(card: DashboardCard) -> dict[str, Any]:
+    if card.card_type == "media-control":
+        return {"type": "media-control", "entity": card.entity}
+    return {"type": "entities", "title": card.title, "entities": list(card.entities)}
 
 
 def write_dashboard(dashboard: Dashboard, path: Path) -> None:

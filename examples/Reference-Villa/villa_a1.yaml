@@ -18,6 +18,9 @@ knx:
     state_address: 1/1/11
     brightness_address: 1/1/12
     brightness_state_address: 1/1/13
+  - name: Audio Absolut volume
+    address: 1/1/202
+    brightness_address: 1/1/211
   switch:
   - name: Stone Power
     address: 1/1/20
@@ -46,8 +49,6 @@ knx:
   - name: Audio Play/Pause
     address: 1/1/222
     state_address: 1/1/223
-  - name: Audio Next/Prev
-    address: 1/1/226
   - name: Audio Power Convert
     address: 1/1/240
     state_address: 1/1/241
@@ -85,24 +86,25 @@ knx:
   - name: DMX Terrace Dimming
     type: percent
     state_address: 1/1/170
-  - name: Audio Absolut volume
-    type: percent
-    state_address: 1/1/211
   - name: Audio Volume
     type: percent
     state_address: 1/1/212
   - name: Audio Track name
     type: latin_1
     state_address: 1/1/231
-  - name: Audio Playlist Select
-    type: 1byte_unsigned
-    state_address: 1/1/239
   - name: Audio Play mode
     type: pulse
     state_address: 1/1/243
   date:
   - name: Date
     address: 1/1/42
+  button:
+  - name: Audio Next/Prev
+    address: 1/1/226
+  number:
+  - name: Audio Playlist Select
+    address: 1/1/239
+    type: 1byte_unsigned
   scene:
   - name: Scene 1
     address: 1/1/150
@@ -159,3 +161,52 @@ script:
     - service: scene.turn_on
       target:
         entity_id: scene.villa_a1_scene_6
+media_player:
+- platform: universal
+  name: Villa A1 Audio
+  unique_id: villa_a1_audio_module
+  commands:
+    turn_on:
+      action: switch.turn_on
+      target:
+        entity_id: switch.audio_power
+    turn_off:
+      action: switch.turn_off
+      target:
+        entity_id: switch.audio_power
+    media_play:
+      action: switch.turn_on
+      target:
+        entity_id: switch.audio_play_pause
+    media_pause:
+      action: switch.turn_off
+      target:
+        entity_id: switch.audio_play_pause
+    media_next_track:
+      action: button.press
+      target:
+        entity_id: button.audio_next_prev
+    volume_mute:
+      action: switch.toggle
+      target:
+        entity_id: switch.audio_mute
+    volume_set:
+      action: light.turn_on
+      target:
+        entity_id: light.audio_absolut_volume
+      data:
+        brightness_pct: '{{ (volume_level * 100) | round(0) }}'
+    select_source:
+      action: number.set_value
+      target:
+        entity_id: number.audio_playlist_select
+      data:
+        value: '{{ source }}'
+  attributes:
+    is_volume_muted: switch.audio_mute
+    volume_level: light.audio_absolut_volume|brightness
+    media_title: sensor.audio_track_name
+    source: number.audio_playlist_select
+  state_template: "{% if is_state('switch.audio_power', 'off') %}\n  off\n{% elif\
+    \ is_state('switch.audio_play_pause', 'on') %}\n  playing\n{% else %}\n  idle\n\
+    {% endif %}"

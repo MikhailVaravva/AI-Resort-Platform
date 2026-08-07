@@ -36,7 +36,15 @@ def test_reference_villa_domain_distribution():
     package = _build()
 
     counts = collections.Counter(e.domain for e in package.entities)
-    assert counts == {"switch": 13, "light": 2, "sensor": 16, "cover": 1, "date": 1}
+    assert counts == {
+        "switch": 12,
+        "light": 3,
+        "sensor": 14,
+        "cover": 1,
+        "date": 1,
+        "button": 1,
+        "number": 1,
+    }
 
 
 def test_reference_villa_no_unique_id_collisions():
@@ -113,11 +121,21 @@ def test_reference_villa_package_yaml_round_trips_via_existing_generator():
 
     data = yaml.safe_load(package_to_yaml(package))
 
-    assert set(data.keys()) == {"knx", "script"}
-    assert set(data["knx"].keys()) == {"switch", "light", "sensor", "cover", "scene", "date"}
-    assert len(data["knx"]["light"]) == 2
+    assert set(data.keys()) == {"knx", "script", "media_player"}
+    assert set(data["knx"].keys()) == {
+        "switch",
+        "light",
+        "sensor",
+        "cover",
+        "scene",
+        "date",
+        "button",
+        "number",
+    }
+    assert len(data["knx"]["light"]) == 3
     assert len(data["knx"]["scene"]) == 6
     assert len(data["script"]) == 6
+    assert len(data["media_player"]) == 1
 
 
 def test_reference_villa_writes_a_valid_yaml_file(tmp_path):
@@ -146,7 +164,18 @@ def test_reference_villa_dashboard_covers_every_domain_present():
     view = dashboard.views[0]
     card_titles = {c.title for c in view.cards}
 
-    assert card_titles == {"Lights", "Sensors", "Switches", "Covers", "Scenes", "Scripts", "Dates"}
+    assert card_titles == {
+        "Lights",
+        "Sensors",
+        "Switches",
+        "Covers",
+        "Scenes",
+        "Scripts",
+        "Dates",
+        "Numbers",
+        "Buttons",
+        "Villa A1 Audio",
+    }
 
     total_entities_in_cards = sum(len(c.entities) for c in view.cards)
     assert total_entities_in_cards == len(package.entities) + len(package.scenes) + len(
@@ -202,14 +231,22 @@ def test_reference_villa_audio_module_package_excludes_touch_panel_mirrors():
     # is available on the module-scoped package for these:
     assert by_id["villa_a1_audio_mute"].config == {"address": "1/1/220"}
     assert by_id["villa_a1_audio_play_pause"].config == {"address": "1/1/222"}
-    # DPT 5.001 with no companion DPT-1.x switch address - the KNX `light`
-    # platform requires `address` (or `individual_colors`), confirmed
-    # against a real Home Assistant instance, so this is a read-only
-    # `sensor` rather than an unbuildable `light`.
-    assert by_id["villa_a1_audio_absolut_volume_percent"].domain == "sensor"
+    # Rebuilt as a writable `light` (borrowing "Audio Power"'s address) so
+    # the media_player can actually control volume, not just observe it -
+    # see _apply_audio_module_semantics.
+    assert by_id["villa_a1_audio_absolut_volume_percent"].domain == "light"
     assert by_id["villa_a1_audio_absolut_volume_percent"].config == {
-        "type": "percent",
-        "state_address": "1/1/211",
+        "address": "1/1/202",
+        "brightness_address": "1/1/211",
+    }
+    # DPST-1-7 "step": a momentary pulse, not a persistent switch state.
+    assert by_id["villa_a1_audio_next_prev"].domain == "button"
+    # Rebuilt as a writable `number` (its communication object is
+    # genuinely read/write, verified) so select_source can work.
+    assert by_id["villa_a1_audio_playlist_select_1byte_unsigned"].domain == "number"
+    assert by_id["villa_a1_audio_playlist_select_1byte_unsigned"].config == {
+        "address": "1/1/239",
+        "type": "1byte_unsigned",
     }
 
 
@@ -219,5 +256,63 @@ def test_reference_villa_audio_module_package_yaml_round_trips():
 
     data = yaml.safe_load(package_to_yaml(package))
 
-    assert set(data.keys()) == {"knx"}
-    assert set(data["knx"].keys()) == {"switch", "sensor"}
+    assert set(data.keys()) == {"knx", "media_player"}
+    assert set(data["knx"].keys()) == {"switch", "sensor", "light", "button", "number"}
+    assert len(data["media_player"]) == 1
+
+
+def test_reference_villa_media_player_maps_every_requested_field():
+    package = _build()
+
+    assert len(package.media_players) == 1
+    media_player = package.media_players[0]
+    assert media_player.unique_id == "villa_a1_audio_module"
+    assert media_player.name == "Villa A1 Audio"
+
+    commands = media_player.commands
+    assert commands["turn_on"]["target"] == {"entity_id": "switch.audio_power"}
+    assert commands["turn_off"]["target"] == {"entity_id": "switch.audio_power"}
+    assert commands["media_play"]["target"] == {"entity_id": "switch.audio_play_pause"}
+    assert commands["media_pause"]["target"] == {"entity_id": "switch.audio_play_pause"}
+    assert commands["media_next_track"] == {
+        "action": "button.press",
+        "target": {"entity_id": "button.audio_next_prev"},
+    }
+    assert commands["volume_mute"] == {
+        "action": "switch.toggle",
+        "target": {"entity_id": "switch.audio_mute"},
+    }
+    assert commands["volume_set"] == {
+        "action": "light.turn_on",
+        "target": {"entity_id": "light.audio_absolut_volume"},
+        "data": {"brightness_pct": "{{ (volume_level * 100) | round(0) }}"},
+    }
+    assert commands["select_source"] == {
+        "action": "number.set_value",
+        "target": {"entity_id": "number.audio_playlist_select"},
+        "data": {"value": "{{ source }}"},
+    }
+
+    assert media_player.attributes == {
+        "is_volume_muted": "switch.audio_mute",
+        "volume_level": "light.audio_absolut_volume|brightness",
+        "media_title": "sensor.audio_track_name",
+        "source": "number.audio_playlist_select",
+    }
+    assert "state" not in media_player.attributes
+    # Off vs idle vs playing needs both "Audio Power" and "Audio
+    # Play/Pause" together - neither switch's own state alone is a valid
+    # media_player state.
+    assert "switch.audio_power" in media_player.state_template
+    assert "switch.audio_play_pause" in media_player.state_template
+
+
+def test_reference_villa_dashboard_has_a_media_control_card_for_the_media_player():
+    package = _build()
+    dashboard = build_dashboard(package)
+    view = dashboard.views[0]
+
+    cards_by_title = {c.title: c for c in view.cards}
+    card = cards_by_title["Villa A1 Audio"]
+    assert card.card_type == "media-control"
+    assert card.entity == "media_player.villa_a1_audio"

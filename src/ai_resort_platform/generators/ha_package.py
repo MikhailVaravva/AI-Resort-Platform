@@ -37,6 +37,31 @@ class HaScript:
 
 
 @dataclass(frozen=True, slots=True)
+class HaMediaPlayer:
+    """One Home Assistant `media_player`, built via the core `universal`
+    platform (home-assistant.io/integrations/universal/) - the KNX
+    integration has no native media_player platform, so this composes one
+    entirely from other entities already in this package. `commands` maps
+    a fixed set of documented command names (turn_on, media_play, ...) to
+    a service-call dict (`action`/`target`/`data`, verbatim as `universal`
+    expects); `attributes` maps a fixed set of documented media_player
+    attribute names to `entity_id` (or `entity_id|attribute`) strings.
+    `state_template` is the documented alternative to a plain
+    `attributes["state"]` entity reference, for when the state depends on
+    more than one entity (e.g. a power switch and a play/pause switch
+    together deciding between off/idle/playing) - `universal` evaluates
+    it itself, so it replaces `attributes["state"]` rather than
+    complementing it.
+    """
+
+    unique_id: str
+    name: str
+    commands: dict[str, dict[str, object]] = field(default_factory=dict)
+    attributes: dict[str, str] = field(default_factory=dict)
+    state_template: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class HaAutomation:
     """One Home Assistant `automation` (trigger -> action).
 
@@ -62,15 +87,23 @@ class HomeAssistantPackage:
     entities: tuple[HaEntity, ...] = field(default_factory=tuple)
     scenes: tuple[HaScene, ...] = field(default_factory=tuple)
     scripts: tuple[HaScript, ...] = field(default_factory=tuple)
+    media_players: tuple[HaMediaPlayer, ...] = field(default_factory=tuple)
     automations: tuple[HaAutomation, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
 class DashboardCard:
-    """One Lovelace "entities" card."""
+    """One Lovelace card.
+
+    Two shapes, chosen by `card_type`: the default "entities" card lists
+    multiple entities (`entities`); "media-control" (the documented card
+    for a media_player entity) is a single-entity card (`entity`) instead.
+    """
 
     title: str
     entities: tuple[str, ...] = field(default_factory=tuple)
+    card_type: str = "entities"
+    entity: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,6 +9,7 @@ description = "Reference Villa -> Digital Twin -> Clone Engine -> Deployment for
 requires-python = ">=3.12"
 dependencies = [
     "pyyaml>=6.0",
+    "xknxproject>=3.10.0",
 ]
 
 [project.optional-dependencies]
@@ -31,17 +32,19 @@ line-length = 100
 target-version = "py312"
 # This repo root also holds unrelated projects/infrastructure
 # (ai-resort-generator/, homeassistant/, grafana/, ...) - scope to our own tree.
+# Root-anchored (leading "/") so this doesn't also match
+# src/ai_resort_platform/homeassistant/, which is our own package.
 extend-exclude = [
-    "ai-resort-generator",
-    "homeassistant",
-    "grafana",
-    "influxdb",
-    "mosquitto",
-    "nodered",
-    "ollama",
-    "openwebui",
-    "postgres",
-    "backups",
+    "/ai-resort-generator",
+    "/homeassistant",
+    "/grafana",
+    "/influxdb",
+    "/mosquitto",
+    "/nodered",
+    "/ollama",
+    "/openwebui",
+    "/postgres",
+    "/backups",
 ]
 
 [tool.ruff.lint]
@@ -50,7 +53,8 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.black]
 line-length = 100
 target-version = ["py312"]
-extend-exclude = "/(ai-resort-generator|homeassistant|grafana|influxdb|mosquitto|nodered|ollama|openwebui|postgres|backups)/"
+# Root-anchored (^) so this doesn't also match src/ai_resort_platform/homeassistant/.
+extend-exclude = "^/(ai-resort-generator|homeassistant|grafana|influxdb|mosquitto|nodered|ollama|openwebui|postgres|backups)/"
 
 [tool.mypy]
 python_version = "3.12"

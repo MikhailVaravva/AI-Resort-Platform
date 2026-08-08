@@ -252,3 +252,12 @@ automation:
       entity_id: media_player.villa_a1_audio
     data:
       source: '2'
+- alias: Villa A1 Departure
+  triggers:
+  - trigger: state
+    entity_id: switch.guest
+    to: 'off'
+  actions:
+  - action: switch.turn_off
+    target:
+      entity_id: switch.audio_power

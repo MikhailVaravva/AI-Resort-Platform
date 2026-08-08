@@ -294,6 +294,7 @@ def _build_package(
         volume_percent=welcome_volume_percent,
         background_delay=welcome_to_background_delay,
     )
+    departure_automation = _build_departure_automation(slug, villa_name, tuple(entities))
     areas = _build_areas(project, group_addresses, tuple(entities), scenes)
 
     return HomeAssistantPackage(
@@ -304,7 +305,7 @@ def _build_package(
         scripts=scripts,
         media_players=(media_player,) if media_player else (),
         template_sensors=(volume_level_sensor,) if volume_level_sensor else (),
-        automations=(welcome_automation,) if welcome_automation else (),
+        automations=tuple(a for a in (welcome_automation, departure_automation) if a is not None),
         areas=areas,
     )
 
@@ -633,6 +634,44 @@ def _build_welcome_automation(
             call("media_player.volume_set", {"volume_level": volume_percent / 100}),
             {"delay": background_delay},
             call("media_player.select_source", {"source": str(background_playlist)}),
+        ),
+    )
+
+
+def _build_departure_automation(
+    slug: str, villa_name: str, entities: tuple[HaEntity, ...]
+) -> HaAutomation | None:
+    """Check-out automation: when "Guest" turns off, put the Audio Module
+    into Standby - the real BAB "Standby" function (1/1/202/1/1/203, see
+    the BAB capability matrix), NOT "Power" (1/1/240/1/1/241): the two are
+    deliberately kept separate everywhere else in this generator (see
+    _build_audio_media_player), and this automation targets the Standby
+    switch directly rather than going through the media_player, since
+    Standby was never wired into the media_player's own commands.
+
+    Per the official BAB AUDIOMODULE V3 documentation, Standby's command
+    telegram values are 0=Power off, 1=Power on - exactly the KNX
+    `switch` platform's own on/off semantics, so a plain `switch.turn_off`
+    on "Audio Power" is the correct, direct way to send it.
+
+    Matched by name, same as every other generator here - nothing here is
+    specific to any one villa. Returns None if the villa has no "Guest"
+    switch or no "Audio Power" (Standby) switch.
+    """
+    guest = next((e for e in entities if e.name == "Guest" and e.domain == "switch"), None)
+    standby = next((e for e in entities if e.name == "Audio Power" and e.domain == "switch"), None)
+    if guest is None or standby is None:
+        return None
+
+    return HaAutomation(
+        unique_id=f"{slug}_departure",
+        name=f"{villa_name} Departure",
+        triggers=({"trigger": "state", "entity_id": _entity_id(guest), "to": "off"},),
+        actions=(
+            {
+                "action": "switch.turn_off",
+                "target": {"entity_id": _entity_id(standby)},
+            },
         ),
     )
 

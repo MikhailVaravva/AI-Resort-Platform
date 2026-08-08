@@ -633,7 +633,9 @@ def test_welcome_automation_is_built_when_playlists_are_supplied():
 
     package = build_package(project, welcome_playlist=1, background_playlist=2)
 
-    assert len(package.automations) == 1
+    # 2, not 1: "Guest" -> off also builds the departure automation (see
+    # _build_departure_automation) - independent of the playlist indices.
+    assert len(package.automations) == 2
     automation = package.automations[0]
     assert automation.unique_id == "hot_stone_villa_welcome"
     assert automation.name == "Hot Stone VILLA Welcome"
@@ -667,12 +669,22 @@ def test_welcome_automation_is_built_when_playlists_are_supplied():
 
 
 def test_welcome_automation_is_not_built_without_both_playlist_indices():
+    """Only the welcome automation is playlist-gated - the departure
+    automation (Guest -> off => Standby, see _build_departure_automation)
+    has no playlist dependency at all, so it still builds."""
     gas = _audio_module_gas() + (_guest_ga(),)
     project = _project(gas)
 
-    assert build_package(project).automations == ()
-    assert build_package(project, welcome_playlist=1).automations == ()
-    assert build_package(project, background_playlist=2).automations == ()
+    departure_only = ("hot_stone_villa_departure",)
+    assert tuple(a.unique_id for a in build_package(project).automations) == departure_only
+    assert (
+        tuple(a.unique_id for a in build_package(project, welcome_playlist=1).automations)
+        == departure_only
+    )
+    assert (
+        tuple(a.unique_id for a in build_package(project, background_playlist=2).automations)
+        == departure_only
+    )
 
 
 def test_welcome_automation_is_not_built_without_a_guest_switch():
@@ -698,3 +710,31 @@ def test_welcome_automation_respects_custom_volume_and_delay():
     automation = package.automations[0]
     assert automation.actions[3]["data"] == {"volume_level": 0.3}
     assert automation.actions[4] == {"delay": "00:10:00"}
+
+
+def test_departure_automation_puts_audio_module_into_standby():
+    """ "Guest" -> off sends Standby's own command GA (1/1/202, "Audio
+    Power" - see the BAB capability matrix), never "Audio Power Convert"
+    (Power, 1/1/240) and never through the media_player, since Standby was
+    deliberately never wired into it (see _build_audio_media_player)."""
+    gas = _audio_module_gas() + (_guest_ga(),)
+    project = _project(gas)
+
+    # No playlist indices at all - the departure automation has no
+    # playlist dependency, unlike the welcome one.
+    package = build_package(project)
+
+    assert len(package.automations) == 1
+    automation = package.automations[0]
+    assert automation.unique_id == "hot_stone_villa_departure"
+    assert automation.name == "Hot Stone VILLA Departure"
+    assert automation.triggers == ({"trigger": "state", "entity_id": "switch.guest", "to": "off"},)
+    assert automation.actions == (
+        {"action": "switch.turn_off", "target": {"entity_id": "switch.audio_power"}},
+    )
+
+
+def test_departure_automation_is_not_built_without_a_guest_switch():
+    package = build_package(_project(_audio_module_gas()))
+
+    assert package.automations == ()

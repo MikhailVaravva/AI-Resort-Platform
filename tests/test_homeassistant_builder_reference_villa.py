@@ -127,7 +127,11 @@ def test_reference_villa_package_yaml_round_trips_via_existing_generator():
 
     data = yaml.safe_load(package_to_yaml(package))
 
-    assert set(data.keys()) == {"knx", "script", "media_player", "template"}
+    # "automation" is present even without welcome_playlist/
+    # background_playlist: the departure automation (Guest -> off =>
+    # Standby, see _build_departure_automation) has no playlist
+    # dependency, unlike the welcome automation.
+    assert set(data.keys()) == {"knx", "script", "media_player", "template", "automation"}
     assert set(data["knx"].keys()) == {
         "switch",
         "light",
@@ -423,10 +427,12 @@ def test_reference_villa_dashboard_has_one_view_per_room():
 
 def test_reference_villa_welcome_automation_is_opt_in():
     """No welcome automation without explicit playlist indices - nothing
-    in ETSProject can supply them."""
+    in ETSProject can supply them. The departure automation (Guest -> off
+    => Standby) still builds, since it has no playlist dependency at all
+    (see _build_departure_automation)."""
     package = _build()
 
-    assert package.automations == ()
+    assert [a.unique_id for a in package.automations] == ["villa_a1_departure"]
 
 
 def test_reference_villa_welcome_automation():
@@ -434,7 +440,10 @@ def test_reference_villa_welcome_automation():
 
     package = build_package(project, welcome_playlist=1, background_playlist=2)
 
-    assert len(package.automations) == 1
+    # 2, not 1: the departure automation (Guest -> off => Standby, see
+    # _build_departure_automation) always builds alongside it here, since
+    # the reference project has both a "Guest" switch and "Audio Power".
+    assert len(package.automations) == 2
     automation = package.automations[0]
     assert automation.unique_id == "villa_a1_welcome"
     assert automation.name == "Villa A1 Welcome"
@@ -455,6 +464,14 @@ def test_reference_villa_welcome_automation():
         "data": {"source": "2"},
     }
 
+    departure = package.automations[1]
+    assert departure.unique_id == "villa_a1_departure"
+    assert departure.name == "Villa A1 Departure"
+    assert departure.triggers == ({"trigger": "state", "entity_id": "switch.guest", "to": "off"},)
+    assert departure.actions == (
+        {"action": "switch.turn_off", "target": {"entity_id": "switch.audio_power"}},
+    )
+
 
 def test_reference_villa_welcome_automation_yaml_structure():
     project = ETSProject.open(REFERENCE_VILLA, password="12345")
@@ -462,10 +479,11 @@ def test_reference_villa_welcome_automation_yaml_structure():
 
     data = yaml.safe_load(package_to_yaml(package))
 
-    assert len(data["automation"]) == 1
+    assert len(data["automation"]) == 2
     automation = data["automation"][0]
     assert automation["alias"] == "Villa A1 Welcome"
     assert "triggers" in automation
     assert "actions" in automation
     assert "trigger" not in automation
     assert "action" not in automation
+    assert data["automation"][1]["alias"] == "Villa A1 Departure"

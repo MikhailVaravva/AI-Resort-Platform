@@ -30,6 +30,7 @@ from ai_resort_platform.generators.ha_package import (
     HaScript,
     HaTemplateSensor,
     HomeAssistantPackage,
+    RoomArea,
 )
 
 _SLUG_INVALID = re.compile(r"[^a-z0-9]+")
@@ -150,10 +151,15 @@ def _build_areas(
     group_addresses: tuple[GroupAddress, ...],
     entities: tuple[HaEntity, ...],
     scenes: tuple[HaScene, ...],
-) -> dict[str, tuple[str, ...]]:
+) -> tuple[RoomArea, ...]:
     """Groups entity_ids by the ETS room their underlying group address is
     wired to - NOT real Home Assistant Areas (see HomeAssistantPackage),
-    only used to organize build_dashboard's per-room views.
+    only used to organize build_dashboard's per-room views. Each
+    resulting RoomArea also carries that room's own Building/Floor names
+    (ets.rooms.Room.building/.floor - already the resolved result of
+    ETS's Building -> BuildingPart -> Floor -> Room location tree, not
+    re-derived here), so build_dashboard can order/label views by that
+    hierarchy instead of by room name alone.
 
     A group address belongs to a room if it's linked to a communication
     object of a device that room's own `Room.device_ids` lists (the same
@@ -162,7 +168,9 @@ def _build_areas(
     occasionally reaches devices in more than one room (KNX group
     addresses can fan out to several physical locations at once); such
     an entity is listed under every room it touches, rather than guessing
-    a single "primary" one.
+    a single "primary" one. Rooms are matched by `Room.id` throughout
+    (not `Room.name`), since two rooms could in principle share a
+    display name but never an id.
 
     Only `entities` and `scenes` are placed - each has a real group
     address of its own. `media_players`/`template_sensors`/`scripts` are
@@ -178,17 +186,17 @@ def _build_areas(
             room_co_ids |= device_co_ids.get(device_id, set())
         for ga in group_addresses:
             if room_co_ids & set(ga.communication_object_ids):
-                address_rooms.setdefault(ga.address, set()).add(room.name)
+                address_rooms.setdefault(ga.address, set()).add(room.id)
 
-    by_room: dict[str, list[str]] = {}
+    by_room_id: dict[str, list[str]] = {}
 
     def place(entity_id: str, addresses: list[str]) -> None:
-        rooms: set[str] = set()
+        room_ids: set[str] = set()
         for address in addresses:
             if _GA_ADDRESS.match(address):
-                rooms |= address_rooms.get(address, set())
-        for room in rooms:
-            by_room.setdefault(room, []).append(entity_id)
+                room_ids |= address_rooms.get(address, set())
+        for room_id in room_ids:
+            by_room_id.setdefault(room_id, []).append(entity_id)
 
     for entity in entities:
         if not _is_internal(entity):
@@ -196,7 +204,17 @@ def _build_areas(
     for scene in scenes:
         place(f"scene.{_slugify(scene.name)}", [scene.address])
 
-    return {room: tuple(ids) for room, ids in by_room.items()}
+    return tuple(
+        RoomArea(
+            room_id=room.id,
+            room=room.name,
+            floor=room.floor,
+            building=room.building,
+            entity_ids=tuple(by_room_id[room.id]),
+        )
+        for room in project.rooms
+        if room.id in by_room_id
+    )
 
 
 def build_package(
@@ -683,6 +701,16 @@ def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
     areas) - the closest equivalent to a per-Area dashboard achievable at
     all, since Home Assistant has no YAML mechanism to create real Areas.
 
+    Room views are ordered by (building, floor, room) - reflecting ETS's
+    Building -> BuildingPart -> Floor -> Room location tree in the tab
+    order, since Lovelace views are always a flat tab list with no
+    nesting of their own; there is no separate "Building"/"Floor" view
+    or grouping beyond that ordering. Each view (villa-wide and every
+    room) gets its own unique `view_id` (see DashboardView), so a room
+    that happens to share its display name with the villa itself (this
+    project's own "Villa A1" is both) never collides with the villa-wide
+    view - Lovelace disambiguates views by `path`, not by `title`.
+
     Entities with `entity_category` set (e.g. "Audio Absolut volume", see
     _apply_audio_module_semantics) are internal KNX implementation
     details, not something a resident should see in a "Lights"/etc. list
@@ -724,11 +752,15 @@ def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
             )
         )
 
-    views = [DashboardView(title=package.villa_name, cards=tuple(cards))]
-    for room in sorted(package.areas):
+    views = [
+        DashboardView(title=package.villa_name, view_id="overview", cards=tuple(cards)),
+    ]
+    for area in sorted(package.areas, key=lambda a: (a.building or "", a.floor or "", a.room)):
         views.append(
             DashboardView(
-                title=room, cards=(DashboardCard(title=room, entities=package.areas[room]),)
+                title=area.room,
+                view_id=_slugify(f"room-{area.room_id}"),
+                cards=(DashboardCard(title=area.room, entities=area.entity_ids),),
             )
         )
     return Dashboard(villa_id=package.villa_id, title=package.villa_name, views=tuple(views))

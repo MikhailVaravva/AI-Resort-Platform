@@ -95,12 +95,41 @@ class HaAutomation:
 
 
 @dataclass(frozen=True, slots=True)
+class RoomArea:
+    """One ETS room's entities, with its place in ETS's Building ->
+    BuildingPart -> Floor -> Room location tree - see
+    HomeAssistantPackage.areas for what this is (and isn't) used for.
+
+    `room_id` is the ETS room's own id (ets.rooms.Room.id) - stable and
+    unique per project, used to derive a collision-free per-room
+    dashboard view id (see generators/ha_yaml.py's `path`) independent of
+    whether the room's display name happens to match the villa's own
+    name.
+
+    `floor`/`building` are Room's own denormalized names for the
+    enclosing Floor/BuildingPart it's nested under (ets.rooms.Room.floor/
+    .building) - the authoritative answer for where THIS room sits in
+    the tree, straight from ETS's location data; not cross-referenced
+    against ETSProject.floors/.buildings (those are a separate catalog of
+    top-level location nodes, not needed to resolve one room's own
+    place in the tree).
+    """
+
+    room_id: str
+    room: str
+    floor: str | None
+    building: str | None
+    entity_ids: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True, slots=True)
 class HomeAssistantPackage:
     """Everything generated for one villa, merged as a single HA `packages/` file.
 
-    `areas` maps each ETS room name to the entity_ids wired to a device
-    in that room - NOT real Home Assistant Areas: Home Assistant has no
-    YAML mechanism to create an Area or assign an entity to one, for any
+    `areas` is one RoomArea per ETS room, each holding the entity_ids
+    wired to a device in that room plus that room's Building/Floor
+    context - NOT real Home Assistant Areas: Home Assistant has no YAML
+    mechanism to create an Area or assign an entity to one, for any
     integration (verified against official docs and HA maintainer
     commentary - it's a UI/runtime-only registry, full stop). This is
     used only to organize build_dashboard's per-room views; it is never
@@ -115,7 +144,7 @@ class HomeAssistantPackage:
     media_players: tuple[HaMediaPlayer, ...] = field(default_factory=tuple)
     template_sensors: tuple[HaTemplateSensor, ...] = field(default_factory=tuple)
     automations: tuple[HaAutomation, ...] = field(default_factory=tuple)
-    areas: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    areas: tuple[RoomArea, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,8 +164,18 @@ class DashboardCard:
 
 @dataclass(frozen=True, slots=True)
 class DashboardView:
+    """`view_id` is the Lovelace view's own unique `path` (home-assistant.
+    io/dashboards/views/) - distinct from `title`, which is free to
+    collide with another view's title (e.g. a villa-wide view and a
+    room view can both display "Villa A1") since Lovelace disambiguates
+    views by `path`, not by title. Left as "" (omitted from the
+    generated YAML - see generators/ha_yaml.py) for callers that don't
+    need a stable id of their own.
+    """
+
     title: str
     cards: tuple[DashboardCard, ...] = field(default_factory=tuple)
+    view_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)

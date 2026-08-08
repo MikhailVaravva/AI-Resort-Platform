@@ -6,6 +6,7 @@ import yaml
 from ai_resort_platform.generators.ha_package import (
     Dashboard,
     DashboardCard,
+    DashboardView,
     HaEntity,
     HaMediaPlayer,
     HaTemplateSensor,
@@ -112,12 +113,21 @@ def write_package(package: HomeAssistantPackage, path: Path) -> None:
 def dashboard_to_yaml(dashboard: Dashboard) -> str:
     data = {
         "title": dashboard.title,
-        "views": [
-            {"title": view.title, "cards": [_card_dict(card) for card in view.cards]}
-            for view in dashboard.views
-        ],
+        "views": [_view_dict(view) for view in dashboard.views],
     }
     return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+
+def _view_dict(view: DashboardView) -> dict[str, Any]:
+    data: dict[str, Any] = {"title": view.title}
+    if view.view_id:
+        # The documented Lovelace view field for a stable, unique
+        # identifier (home-assistant.io/dashboards/views/) - lets two
+        # views share the same `title` (see DashboardView) without
+        # colliding.
+        data["path"] = view.view_id
+    data["cards"] = [_card_dict(card) for card in view.cards]
+    return data
 
 
 def _card_dict(card: DashboardCard) -> dict[str, Any]:

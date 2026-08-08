@@ -455,12 +455,16 @@ def test_areas_group_entities_by_room_not_by_villa():
     """Not real Home Assistant Areas (there is no YAML mechanism to
     create one or assign an entity to it, for any integration) - just an
     ETS-room grouping build_dashboard uses for its per-room views.
-    Verified with two rooms, since the real reference project only has
-    one - nothing here is specific to that villa's layout."""
+    Verified with two rooms on different floors, since the real
+    reference project only has one room - nothing here is specific to
+    that villa's layout. Also verifies each RoomArea carries its own
+    Building/Floor names straight from ETS's Room, not just entities."""
     device_a = Device(individual_address="1.1.1", name="A", communication_object_ids=("1.1.1/O-1",))
     device_b = Device(individual_address="1.1.2", name="B", communication_object_ids=("1.1.2/O-1",))
-    room_a = Room(id="R-1", name="Room A", device_ids=("1.1.1",))
-    room_b = Room(id="R-2", name="Room B", device_ids=("1.1.2",))
+    room_a = Room(
+        id="R-1", name="Room A", floor="Ground", building="Main House", device_ids=("1.1.1",)
+    )
+    room_b = Room(id="R-2", name="Room B", floor="1", building="Main House", device_ids=("1.1.2",))
     gas = (
         GroupAddress(
             id="1",
@@ -501,8 +505,19 @@ def test_areas_group_entities_by_room_not_by_villa():
 
     package = build_package(project)
 
-    assert set(package.areas["Room A"]) == {"switch.stone_power", "switch.shared"}
-    assert set(package.areas["Room B"]) == {"switch.other_power", "switch.shared"}
+    areas_by_room_id = {a.room_id: a for a in package.areas}
+    area_a = areas_by_room_id["R-1"]
+    area_b = areas_by_room_id["R-2"]
+
+    assert set(area_a.entity_ids) == {"switch.stone_power", "switch.shared"}
+    assert set(area_b.entity_ids) == {"switch.other_power", "switch.shared"}
+
+    assert area_a.room == "Room A"
+    assert area_a.floor == "Ground"
+    assert area_a.building == "Main House"
+    assert area_b.room == "Room B"
+    assert area_b.floor == "1"
+    assert area_b.building == "Main House"
 
 
 def test_media_player_is_built_when_every_source_entity_is_present():

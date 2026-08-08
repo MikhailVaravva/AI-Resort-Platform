@@ -399,11 +399,18 @@ def test_reference_villa_areas_group_entities_by_ets_room():
     """Not real Home Assistant Areas (there is no YAML mechanism for
     those at all) - just the ETS-room grouping build_dashboard uses for
     its per-room views. The reference project's single room, "Villa A1",
-    owns every device, so it should own every non-internal entity/scene."""
+    owns every device, so it should own every non-internal entity/scene.
+    Also verifies the RoomArea carries the room's real ETS Building/Floor
+    (Building -> BuildingPart -> Floor -> Room), not just its entities."""
     package = _build()
 
-    assert set(package.areas) == {"Villa A1"}
-    villa_a1 = set(package.areas["Villa A1"])
+    assert len(package.areas) == 1
+    area = package.areas[0]
+    assert area.room == "Villa A1"
+    # Verified against the reference project's own location tree.
+    assert area.floor == "1"
+    assert area.building == "Villa A"
+    villa_a1 = set(area.entity_ids)
 
     assert "light.audio_absolut_volume" not in villa_a1  # internal - excluded
     assert "switch.guest" in villa_a1
@@ -413,16 +420,26 @@ def test_reference_villa_areas_group_entities_by_ets_room():
 
 
 def test_reference_villa_dashboard_has_one_view_per_room():
+    """The reference project's only room happens to be named "Villa A1" -
+    the same as the villa-wide view's own title - so both views share a
+    `title`. Lovelace disambiguates by `view_id` (`path`), not `title`,
+    so the two views must still have distinct, non-empty view_ids (see
+    DashboardView/build_dashboard)."""
     package = _build()
     dashboard = build_dashboard(package)
 
     view_titles = [v.title for v in dashboard.views]
     assert view_titles == ["Villa A1", "Villa A1"]
 
+    view_ids = [v.view_id for v in dashboard.views]
+    assert all(view_ids)  # every view has a real, non-empty id
+    assert len(set(view_ids)) == len(view_ids)  # and none of them collide
+    assert dashboard.views[0].view_id == "overview"
+
     room_view = dashboard.views[1]
     assert len(room_view.cards) == 1
     assert room_view.cards[0].title == "Villa A1"
-    assert set(room_view.cards[0].entities) == set(package.areas["Villa A1"])
+    assert set(room_view.cards[0].entities) == set(package.areas[0].entity_ids)
 
 
 def test_reference_villa_welcome_automation_is_opt_in():

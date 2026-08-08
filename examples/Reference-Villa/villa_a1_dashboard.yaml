@@ -1,0 +1,122 @@
+title: Villa A1
+views:
+- title: Villa A1
+  path: overview
+  cards:
+  - type: entities
+    title: Lights
+    entities:
+    - light.g1
+    - light.g2
+  - type: entities
+    title: Covers
+    entities:
+    - cover.curtain
+  - type: entities
+    title: Switches
+    entities:
+    - switch.stone_power
+    - switch.terrace_door
+    - switch.living_room_button
+    - switch.bathroom_button
+    - switch.terrace_door_contact
+    - switch.guest
+    - switch.all_off
+    - switch.dmx_terrace_on_off
+    - switch.audio_power
+    - switch.audio_mute
+    - switch.audio_play_pause
+    - switch.audio_power_convert
+  - type: entities
+    title: Sensors
+    entities:
+    - sensor.temperature
+    - sensor.humidity
+    - sensor.dmx_stone_red
+    - sensor.dmx_stone_green
+    - sensor.dmx_stone_blue
+    - sensor.dmx_stone_white
+    - sensor.dmx_terrace_red
+    - sensor.dmx_terrace_green
+    - sensor.dmx_terrace_blue
+    - sensor.dmx_terrace_white
+    - sensor.dmx_terrace_dimming
+    - sensor.audio_track_name
+    - sensor.audio_play_mode
+  - type: entities
+    title: Dates
+    entities:
+    - date.date
+  - type: entities
+    title: Numbers
+    entities:
+    - number.audio_playlist_select
+  - type: entities
+    title: Buttons
+    entities:
+    - button.audio_next_prev
+    - button.audio_previous
+  - type: entities
+    title: Scenes
+    entities:
+    - scene.scene_1
+    - scene.scene_2
+    - scene.scene_3
+    - scene.scene_4
+    - scene.scene_5
+    - scene.scene_6
+  - type: entities
+    title: Scripts
+    entities:
+    - script.villa_a1_activate_scene_1
+    - script.villa_a1_activate_scene_2
+    - script.villa_a1_activate_scene_3
+    - script.villa_a1_activate_scene_4
+    - script.villa_a1_activate_scene_5
+    - script.villa_a1_activate_scene_6
+  - type: media-control
+    entity: media_player.villa_a1_audio
+- title: Villa A1
+  path: room_p_035b_0_bp_15
+  cards:
+  - type: entities
+    title: Villa A1
+    entities:
+    - cover.curtain
+    - light.g1
+    - light.g2
+    - switch.stone_power
+    - switch.terrace_door
+    - switch.living_room_button
+    - switch.bathroom_button
+    - switch.terrace_door_contact
+    - sensor.temperature
+    - sensor.humidity
+    - date.date
+    - switch.guest
+    - switch.all_off
+    - sensor.dmx_stone_red
+    - sensor.dmx_stone_green
+    - sensor.dmx_stone_blue
+    - sensor.dmx_stone_white
+    - sensor.dmx_terrace_red
+    - sensor.dmx_terrace_green
+    - sensor.dmx_terrace_blue
+    - sensor.dmx_terrace_white
+    - switch.dmx_terrace_on_off
+    - sensor.dmx_terrace_dimming
+    - switch.audio_power
+    - switch.audio_mute
+    - switch.audio_play_pause
+    - button.audio_next_prev
+    - button.audio_previous
+    - sensor.audio_track_name
+    - number.audio_playlist_select
+    - switch.audio_power_convert
+    - sensor.audio_play_mode
+    - scene.scene_1
+    - scene.scene_2
+    - scene.scene_3
+    - scene.scene_4
+    - scene.scene_5
+    - scene.scene_6

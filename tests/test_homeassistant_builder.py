@@ -362,11 +362,23 @@ def test_audio_module_package_only_includes_group_addresses_wired_to_the_module(
 
 def _audio_module_gas() -> tuple[GroupAddress, ...]:
     return (
+        # "Audio Power" (Standby, per the real BAB Audio Module docs) -
+        # its own independent switch, never referenced by the
+        # media_player (see _build_audio_media_player).
         GroupAddress(id="1", address="1/1/202", name="A1 Audio Power", dpt_main=1, dpt_sub=1),
+        # "Audio Power Convert" is the real Power ON/OFF function the
+        # media_player uses - a different function from "Audio Power"
+        # (Standby) above, per the real BAB Audio Module docs.
+        GroupAddress(
+            id="8", address="1/1/240", name="A1 Audio Power Convert", dpt_main=1, dpt_sub=1
+        ),
         GroupAddress(id="2", address="1/1/222", name="A1 Audio Play/Pause", dpt_main=1, dpt_sub=10),
         GroupAddress(id="3", address="1/1/226", name="A1 Audio Next/Prev", dpt_main=1, dpt_sub=7),
         GroupAddress(
             id="4", address="1/1/211", name="A1 Audio Absolut volume", dpt_main=5, dpt_sub=1
+        ),
+        GroupAddress(
+            id="9", address="1/1/212", name="A1 Audio Volume status", dpt_main=5, dpt_sub=1
         ),
         GroupAddress(id="5", address="1/1/220", name="A1 Audio Mute", dpt_main=1, dpt_sub=3),
         GroupAddress(id="6", address="1/1/231", name="A1 Audio Track name", dpt_main=16, dpt_sub=1),
@@ -390,11 +402,13 @@ def test_audio_module_semantics_reclassify_volume_and_playlist_entities():
     assert volume.config == {
         "address": "1/1/202",
         "brightness_address": "1/1/211",
+        "brightness_state_address": "1/1/212",
         # Internal KNX plumbing for the media_player's volume slider (see
         # _build_audio_media_player) - not meant to show up in a "Lights"
         # list of its own.
         "entity_category": "config",
     }
+    assert "Audio Volume" not in by_name  # folded into the light above
 
     playlist = by_name["Audio Playlist Select"]
     assert playlist.domain == "number"
@@ -402,6 +416,22 @@ def test_audio_module_semantics_reclassify_volume_and_playlist_entities():
 
     next_track = by_name["Audio Next/Prev"]
     assert next_track.domain == "button"
+    assert "payload" not in next_track.config  # unchanged: still the default (1, "next")
+
+    # BAB documents 1/1/226 as bidirectional (EIS1: 0=previous,1=next) -
+    # "Audio Previous" is the other half, same address, explicit payload 0.
+    previous_track = by_name["Audio Previous"]
+    assert previous_track.domain == "button"
+    assert previous_track.config == {"address": "1/1/226", "payload": "0"}
+
+
+def test_volume_light_has_no_brightness_state_address_when_status_ga_is_absent():
+    gas = tuple(ga for ga in _audio_module_gas() if ga.name != "A1 Audio Volume status")
+
+    package = build_package(_project(gas))
+    volume = next(e for e in package.entities if e.name == "Audio Absolut volume")
+
+    assert "brightness_state_address" not in volume.config
 
 
 def test_dashboard_excludes_entity_category_entities_from_domain_cards():
@@ -421,6 +451,60 @@ def test_dashboard_excludes_entity_category_entities_from_domain_cards():
     assert "Lights" not in cards_by_title
 
 
+def test_areas_group_entities_by_room_not_by_villa():
+    """Not real Home Assistant Areas (there is no YAML mechanism to
+    create one or assign an entity to it, for any integration) - just an
+    ETS-room grouping build_dashboard uses for its per-room views.
+    Verified with two rooms, since the real reference project only has
+    one - nothing here is specific to that villa's layout."""
+    device_a = Device(individual_address="1.1.1", name="A", communication_object_ids=("1.1.1/O-1",))
+    device_b = Device(individual_address="1.1.2", name="B", communication_object_ids=("1.1.2/O-1",))
+    room_a = Room(id="R-1", name="Room A", device_ids=("1.1.1",))
+    room_b = Room(id="R-2", name="Room B", device_ids=("1.1.2",))
+    gas = (
+        GroupAddress(
+            id="1",
+            address="1/1/20",
+            name="A1 Stone Power",
+            dpt_main=1,
+            dpt_sub=1,
+            communication_object_ids=("1.1.1/O-1",),
+        ),
+        GroupAddress(
+            id="2",
+            address="1/1/21",
+            name="A1 Other Power",
+            dpt_main=1,
+            dpt_sub=1,
+            communication_object_ids=("1.1.2/O-1",),
+        ),
+        # Fans out to both devices at once (a real KNX group address can
+        # be linked to communication objects in different rooms) - should
+        # land in both rooms' areas, not just one guessed "primary" room.
+        GroupAddress(
+            id="3",
+            address="1/1/99",
+            name="A1 Shared",
+            dpt_main=1,
+            dpt_sub=1,
+            communication_object_ids=("1.1.1/O-1", "1.1.2/O-1"),
+        ),
+    )
+    project = ETSProject(
+        name="Hot Stone VILLA",
+        guid="guid-1",
+        tool_version="6.4.0",
+        devices=(device_a, device_b),
+        rooms=(room_a, room_b),
+        group_addresses=gas,
+    )
+
+    package = build_package(project)
+
+    assert set(package.areas["Room A"]) == {"switch.stone_power", "switch.shared"}
+    assert set(package.areas["Room B"]) == {"switch.other_power", "switch.shared"}
+
+
 def test_media_player_is_built_when_every_source_entity_is_present():
     package = build_package(_project(_audio_module_gas()))
 
@@ -429,8 +513,16 @@ def test_media_player_is_built_when_every_source_entity_is_present():
     assert media_player.unique_id == "hot_stone_villa_audio_module"
     assert media_player.name == "Hot Stone VILLA Audio"
     assert media_player.commands == {
-        "turn_on": {"action": "switch.turn_on", "target": {"entity_id": "switch.audio_power"}},
-        "turn_off": {"action": "switch.turn_off", "target": {"entity_id": "switch.audio_power"}},
+        # "Audio Power Convert" (Power ON/OFF), not "Audio Power"
+        # (Standby) - see _build_audio_media_player.
+        "turn_on": {
+            "action": "switch.turn_on",
+            "target": {"entity_id": "switch.audio_power_convert"},
+        },
+        "turn_off": {
+            "action": "switch.turn_off",
+            "target": {"entity_id": "switch.audio_power_convert"},
+        },
         "media_play": {
             "action": "switch.turn_on",
             "target": {"entity_id": "switch.audio_play_pause"},
@@ -444,6 +536,13 @@ def test_media_player_is_built_when_every_source_entity_is_present():
         "media_next_track": {
             "action": "button.press",
             "target": {"entity_id": "button.audio_next_prev"},
+        },
+        # "Audio Previous" (see _apply_audio_module_semantics) - same
+        # group address as "Audio Next/Prev", payload 0, the other half
+        # of BAB's documented "Media Server - Title +/-" object.
+        "media_previous_track": {
+            "action": "button.press",
+            "target": {"entity_id": "button.audio_previous"},
         },
         "volume_mute": {
             "action": "switch.toggle",
@@ -476,7 +575,10 @@ def test_media_player_is_built_when_every_source_entity_is_present():
         "source": "number.audio_playlist_select",
     }
     assert "state" not in media_player.attributes
-    assert "switch.audio_power" in media_player.state_template
+    # Quoted so "audio_power" (Standby) can't accidentally match as a
+    # substring of "audio_power_convert" (Power).
+    assert "'switch.audio_power_convert'" in media_player.state_template
+    assert "'switch.audio_power'" not in media_player.state_template
     assert "switch.audio_play_pause" in media_player.state_template
 
 

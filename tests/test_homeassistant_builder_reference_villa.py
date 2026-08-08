@@ -36,13 +36,19 @@ def test_reference_villa_domain_distribution():
     package = _build()
 
     counts = collections.Counter(e.domain for e in package.entities)
+    # sensor is 13, not 14: "Audio Volume" (1/1/212) is folded into
+    # "Audio Absolut volume" as brightness_state_address (see
+    # _apply_audio_module_semantics), not a separate sensor anymore.
+    # button is 2, not 1: "Audio Previous" is added alongside "Audio
+    # Next/Prev", the other documented value (0) of the same group
+    # address 1/1/226 (see _apply_audio_module_semantics).
     assert counts == {
         "switch": 12,
         "light": 3,
-        "sensor": 14,
+        "sensor": 13,
         "cover": 1,
         "date": 1,
-        "button": 1,
+        "button": 2,
         "number": 1,
     }
 
@@ -196,7 +202,9 @@ def test_reference_villa_dashboard_yaml_round_trips():
     data = yaml.safe_load(dashboard_to_yaml(dashboard))
 
     assert data["title"] == "Villa A1"
-    assert len(data["views"]) == 1
+    # Villa-wide view + one per-room view (the reference project has a
+    # single room, "Villa A1") - see _build_areas.
+    assert len(data["views"]) == 2
 
 
 def test_reference_villa_writes_a_dashboard_file(tmp_path):
@@ -226,6 +234,10 @@ def test_reference_villa_audio_module_package_excludes_touch_panel_mirrors():
         "villa_a1_audio_mute",
         "villa_a1_audio_play_pause",
         "villa_a1_audio_next_prev",
+        # The other documented value (0, "previous") of the same group
+        # address as "villa_a1_audio_next_prev" - see
+        # _apply_audio_module_semantics.
+        "villa_a1_audio_next_prev_previous",
         "villa_a1_audio_track_name_latin_1",
         "villa_a1_audio_playlist_select_1byte_unsigned",
     }
@@ -248,6 +260,11 @@ def test_reference_villa_audio_module_package_excludes_touch_panel_mirrors():
     }
     # DPST-1-7 "step": a momentary pulse, not a persistent switch state.
     assert by_id["villa_a1_audio_next_prev"].domain == "button"
+    assert by_id["villa_a1_audio_next_prev_previous"].domain == "button"
+    assert by_id["villa_a1_audio_next_prev_previous"].config == {
+        "address": "1/1/226",
+        "payload": "0",
+    }
     # Rebuilt as a writable `number` (its communication object is
     # genuinely read/write, verified) so select_source can work.
     assert by_id["villa_a1_audio_playlist_select_1byte_unsigned"].domain == "number"
@@ -258,14 +275,21 @@ def test_reference_villa_audio_module_package_excludes_touch_panel_mirrors():
 
 
 def test_reference_villa_audio_module_package_yaml_round_trips():
+    """No `media_player` here: "Audio Power Convert" (the real Power
+    ON/OFF function, see _build_audio_media_player) has no communication
+    object on the Audio Module device itself - only on the touch panel -
+    so build_audio_module_package's device-scoped filter never includes
+    it, and the media_player can't be built without it (same as any
+    other missing required entity)."""
     project = ETSProject.open(REFERENCE_VILLA, password="12345")
     package = build_audio_module_package(project)
 
+    assert package.media_players == ()
+
     data = yaml.safe_load(package_to_yaml(package))
 
-    assert set(data.keys()) == {"knx", "media_player", "template"}
+    assert set(data.keys()) == {"knx", "template"}
     assert set(data["knx"].keys()) == {"switch", "sensor", "light", "button", "number"}
-    assert len(data["media_player"]) == 1
 
 
 def test_reference_villa_media_player_maps_every_requested_field():
@@ -277,13 +301,23 @@ def test_reference_villa_media_player_maps_every_requested_field():
     assert media_player.name == "Villa A1 Audio"
 
     commands = media_player.commands
-    assert commands["turn_on"]["target"] == {"entity_id": "switch.audio_power"}
-    assert commands["turn_off"]["target"] == {"entity_id": "switch.audio_power"}
+    # "Audio Power Convert" (1/1/240 command, 1/1/241 status) is the real
+    # Power ON/OFF function, confirmed against the BAB Audio Module's own
+    # documentation - "Audio Power" (1/1/202/1/1/203) is a separate
+    # Standby function, deliberately not used by the media_player at all.
+    assert commands["turn_on"]["target"] == {"entity_id": "switch.audio_power_convert"}
+    assert commands["turn_off"]["target"] == {"entity_id": "switch.audio_power_convert"}
     assert commands["media_play"]["target"] == {"entity_id": "switch.audio_play_pause"}
     assert commands["media_pause"]["target"] == {"entity_id": "switch.audio_play_pause"}
     assert commands["media_next_track"] == {
         "action": "button.press",
         "target": {"entity_id": "button.audio_next_prev"},
+    }
+    # Same group address as media_next_track (1/1/226), payload 0 - BAB's
+    # documented "previous" value for this object.
+    assert commands["media_previous_track"] == {
+        "action": "button.press",
+        "target": {"entity_id": "button.audio_previous"},
     }
     assert commands["volume_mute"] == {
         "action": "switch.toggle",
@@ -307,10 +341,12 @@ def test_reference_villa_media_player_maps_every_requested_field():
         "source": "number.audio_playlist_select",
     }
     assert "state" not in media_player.attributes
-    # Off vs idle vs playing needs both "Audio Power" and "Audio
-    # Play/Pause" together - neither switch's own state alone is a valid
-    # media_player state.
-    assert "switch.audio_power" in media_player.state_template
+    # Off vs idle vs playing needs both "Audio Power Convert" (Power) and
+    # "Audio Play/Pause" together - neither switch's own state alone is a
+    # valid media_player state. Quoted so "audio_power" (Standby) can't
+    # accidentally match as a substring of "audio_power_convert" (Power).
+    assert "'switch.audio_power_convert'" in media_player.state_template
+    assert "'switch.audio_power'" not in media_player.state_template
     assert "switch.audio_play_pause" in media_player.state_template
 
 
@@ -353,6 +389,36 @@ def test_reference_villa_dashboard_has_a_media_control_card_for_the_media_player
     card = cards_by_title["Villa A1 Audio"]
     assert card.card_type == "media-control"
     assert card.entity == "media_player.villa_a1_audio"
+
+
+def test_reference_villa_areas_group_entities_by_ets_room():
+    """Not real Home Assistant Areas (there is no YAML mechanism for
+    those at all) - just the ETS-room grouping build_dashboard uses for
+    its per-room views. The reference project's single room, "Villa A1",
+    owns every device, so it should own every non-internal entity/scene."""
+    package = _build()
+
+    assert set(package.areas) == {"Villa A1"}
+    villa_a1 = set(package.areas["Villa A1"])
+
+    assert "light.audio_absolut_volume" not in villa_a1  # internal - excluded
+    assert "switch.guest" in villa_a1
+    assert "light.g1" in villa_a1
+    assert all(f"scene.scene_{n}" in villa_a1 for n in range(1, 7))
+    assert len(villa_a1) == len(package.entities) - 1 + len(package.scenes)
+
+
+def test_reference_villa_dashboard_has_one_view_per_room():
+    package = _build()
+    dashboard = build_dashboard(package)
+
+    view_titles = [v.title for v in dashboard.views]
+    assert view_titles == ["Villa A1", "Villa A1"]
+
+    room_view = dashboard.views[1]
+    assert len(room_view.cards) == 1
+    assert room_view.cards[0].title == "Villa A1"
+    assert set(room_view.cards[0].entities) == set(package.areas["Villa A1"])
 
 
 def test_reference_villa_welcome_automation_is_opt_in():

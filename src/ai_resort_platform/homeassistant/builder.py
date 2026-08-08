@@ -33,6 +33,11 @@ from ai_resort_platform.generators.ha_package import (
 )
 
 _SLUG_INVALID = re.compile(r"[^a-z0-9]+")
+# A bare KNX group address, e.g. "1/1/202" - distinguishes real address
+# values in an HaEntity/HaScene's config from non-address strings (e.g.
+# `type: "temperature"`, `entity_category: "config"`) sharing the same
+# plain dict, without hardcoding which config keys are addresses.
+_GA_ADDRESS = re.compile(r"^\d+/\d+/\d+$")
 _VILLA_CODE_PREFIX = re.compile(r"^[A-Z]\d+\s+")
 # Same source-naming quirks handled in generators/ha_builder.py: a status GA
 # is sometimes "X status", sometimes "X, status" (stray comma); a command GA
@@ -133,6 +138,67 @@ def _media_player_entity_id(media_player: HaMediaPlayer) -> str:
     return f"media_player.{_slugify(media_player.name)}"
 
 
+def _is_internal(entity: HaEntity) -> bool:
+    """`entity_category` (see _apply_audio_module_semantics) marks an
+    entity as internal KNX plumbing, not something a resident should see
+    in a domain list or a room's view."""
+    return "entity_category" in entity.config
+
+
+def _build_areas(
+    project: ETSProject,
+    group_addresses: tuple[GroupAddress, ...],
+    entities: tuple[HaEntity, ...],
+    scenes: tuple[HaScene, ...],
+) -> dict[str, tuple[str, ...]]:
+    """Groups entity_ids by the ETS room their underlying group address is
+    wired to - NOT real Home Assistant Areas (see HomeAssistantPackage),
+    only used to organize build_dashboard's per-room views.
+
+    A group address belongs to a room if it's linked to a communication
+    object of a device that room's own `Room.device_ids` lists (the same
+    device/CO/GA linkage build_audio_module_package already uses to scope
+    a device's group addresses) - not by name-matching. A group address
+    occasionally reaches devices in more than one room (KNX group
+    addresses can fan out to several physical locations at once); such
+    an entity is listed under every room it touches, rather than guessing
+    a single "primary" one.
+
+    Only `entities` and `scenes` are placed - each has a real group
+    address of its own. `media_players`/`template_sensors`/`scripts` are
+    composites built from other entities (see _build_audio_media_player),
+    not wired to one physical KNX address, so there is nothing here to
+    place them by.
+    """
+    device_co_ids = {d.individual_address: set(d.communication_object_ids) for d in project.devices}
+    address_rooms: dict[str, set[str]] = {}
+    for room in project.rooms:
+        room_co_ids: set[str] = set()
+        for device_id in room.device_ids:
+            room_co_ids |= device_co_ids.get(device_id, set())
+        for ga in group_addresses:
+            if room_co_ids & set(ga.communication_object_ids):
+                address_rooms.setdefault(ga.address, set()).add(room.name)
+
+    by_room: dict[str, list[str]] = {}
+
+    def place(entity_id: str, addresses: list[str]) -> None:
+        rooms: set[str] = set()
+        for address in addresses:
+            if _GA_ADDRESS.match(address):
+                rooms |= address_rooms.get(address, set())
+        for room in rooms:
+            by_room.setdefault(room, []).append(entity_id)
+
+    for entity in entities:
+        if not _is_internal(entity):
+            place(_entity_id(entity), list(entity.config.values()))
+    for scene in scenes:
+        place(f"scene.{_slugify(scene.name)}", [scene.address])
+
+    return {room: tuple(ids) for room, ids in by_room.items()}
+
+
 def build_package(
     project: ETSProject,
     *,
@@ -228,6 +294,7 @@ def _build_package(
         volume_percent=welcome_volume_percent,
         background_delay=welcome_to_background_delay,
     )
+    areas = _build_areas(project, group_addresses, tuple(entities), scenes)
 
     return HomeAssistantPackage(
         villa_id=project.guid,
@@ -238,6 +305,7 @@ def _build_package(
         media_players=(media_player,) if media_player else (),
         template_sensors=(volume_level_sensor,) if volume_level_sensor else (),
         automations=(welcome_automation,) if welcome_automation else (),
+        areas=areas,
     )
 
 
@@ -250,16 +318,21 @@ def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEnt
     structural shape - a single command-role DPT 5 key - but are out of
     scope here):
 
-    - "Audio Absolut volume" (DPT 5.001) has no DPT-1.x switch of its own,
-      so the generic pipeline exposes it as a read-only `sensor` (see
-      _build_entities_for) - but its communication object is genuinely
-      read/write (verified), a continuously controllable level with
-      nothing to switch, not a status readout. Rebuilt as a `light`
+    - "Audio Absolut volume" (1/1/211, DPT 5.001) has no DPT-1.x switch of
+      its own, so the generic pipeline exposes it as a read-only `sensor`
+      (see _build_entities_for) - but its communication object is
+      genuinely read/write (verified), a continuously controllable level
+      with nothing to switch, not a status readout. Rebuilt as a `light`
       instead: `address` is required by that platform regardless, so it
       borrows "Audio Power"'s (the same physical module, already a
       command target) to satisfy it, while `brightness_address` is the
       real, writable volume value - the point of this change is to make
-      volume actually controllable, not just observable. It's given
+      volume actually controllable, not just observable. "Audio Volume"
+      (1/1/212) is verified real ETS data too - the status counterpart of
+      1/1/211, just not name-paired with it by the generic pipeline
+      ("Audio Absolut volume" vs "Audio Volume" don't strip to the same
+      base name) - folded in here as `brightness_state_address` instead
+      of staying its own separate, redundant sensor. The light is given
       `entity_category: config` (a documented common KNX option, see
       home-assistant.io/integrations/knx/): the media_player's own
       volume slider (backed by this light, see
@@ -269,31 +342,60 @@ def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEnt
       exclude `config`/`diagnostic` entities, and build_dashboard does
       the same for our own generated dashboard (see there), so a
       "Volume" light never shows up in a "Lights" list next to real ones.
-    - "Audio Playlist Select" (DPT 5, no sub-type) is wired to the exact
-      same communication object as "Audio Absolut volume" (verified:
-      identical read/write/communication/transmit flags) - a real,
-      writable command target, not a status readout - so it becomes a
-      `number` (writable) instead of a read-only `sensor`.
+    - "Audio Playlist Select" (1/1/239, DPT 5, no sub-type) is wired to
+      the exact same communication object as "Audio Absolut volume"
+      (verified: identical read/write/communication/transmit flags) - a
+      real, writable command target, not a status readout - so it
+      becomes a `number` (writable) instead of a read-only `sensor`.
+    - "Audio Next/Prev" (1/1/226, DPST-1-7 "step") already becomes a
+      `button` via the generic pipeline (see _TRIGGER_DPTS), sending the
+      default payload 1 - "next", per the official BAB AUDIOMODULE V3
+      documentation ("Media Server - Title +/-", EIS1: 0=previous track,
+      1=next track). That same group address's other documented value
+      (0, "previous") was never reachable from a single fixed-payload
+      button, so a second `button` entity, "Audio Previous", is added
+      here targeting the identical address with `payload: 0` - no new
+      group address, just the other half of the one BAB already
+      documents on 1/1/226. The original "Audio Next/Prev" entity is
+      left completely unchanged.
+
+    Every address used here (1/1/202, 1/1/211, 1/1/212, 1/1/226,
+    1/1/239) is a verified, real group address in the reference project -
+    none invented.
     """
-    power = next((e for e in entities if e.name == "Audio Power"), None)
+    by_name = {e.name: e for e in entities}
+    power = by_name.get("Audio Power")
     if power is None:
         return entities
+    volume_status = by_name.get("Audio Volume")
 
     result = []
     for entity in entities:
-        if entity.name == "Audio Absolut volume" and entity.domain == "sensor":
+        if entity.name == "Audio Next/Prev" and entity.domain == "button":
+            result.append(entity)
             result.append(
                 HaEntity(
-                    domain="light",
-                    unique_id=entity.unique_id,
-                    name=entity.name,
-                    config={
-                        "address": power.config["address"],
-                        "brightness_address": entity.config["state_address"],
-                        "entity_category": "config",
-                    },
+                    domain="button",
+                    unique_id=f"{entity.unique_id}_previous",
+                    name="Audio Previous",
+                    config={"address": entity.config["address"], "payload": "0"},
                 )
             )
+        elif entity.name == "Audio Absolut volume" and entity.domain == "sensor":
+            config = {
+                "address": power.config["address"],
+                "brightness_address": entity.config["state_address"],
+                "entity_category": "config",
+            }
+            if volume_status is not None:
+                config["brightness_state_address"] = volume_status.config["state_address"]
+            result.append(
+                HaEntity(
+                    domain="light", unique_id=entity.unique_id, name=entity.name, config=config
+                )
+            )
+        elif entity.name == "Audio Volume" and volume_status is not None:
+            continue  # folded into "Audio Absolut volume" above, see there
         elif entity.name == "Audio Playlist Select" and entity.domain == "sensor":
             result.append(
                 HaEntity(
@@ -322,9 +424,30 @@ def _build_audio_media_player(
     audio module wired up at all).
     """
     by_name = {e.name: e for e in entities}
-    power = by_name.get("Audio Power")
+    # "Audio Power Convert" (1/1/240 command, 1/1/241 status) is the real
+    # Power ON/OFF function - confirmed by the user against the BAB Audio
+    # Module's own documentation, distinct from "Audio Power" (1/1/202/
+    # 1/1/203), which is Standby, a separate function. Power's own
+    # communication objects live only on the KNX Smart Touch S3 touch
+    # panel (device 1.1.4), not the Audio Module itself (1.1.5) - verified
+    # against the reference project - so build_audio_module_package's
+    # device-CO-based scoping (see there) never includes it; the
+    # media_player this function builds for that narrower package will
+    # be None as a result, same as if any other required entity were
+    # missing. "Audio Power" (Standby) is deliberately NOT referenced
+    # anywhere in this function: it stays its own independent switch,
+    # unaffected by any media_player command (turn_on/turn_off/
+    # state_template all use Power, never Standby).
+    power = by_name.get("Audio Power Convert")
     play_pause = by_name.get("Audio Play/Pause")
     next_track = by_name.get("Audio Next/Prev")
+    # "Audio Previous" (see _apply_audio_module_semantics) is the other
+    # half of the same BAB-documented group address as "Audio Next/Prev"
+    # (1/1/226, EIS1: 0=previous,1=next) - optional here (not one of the
+    # required entities below) since older packages built before this
+    # entity existed still have a fully working media_player without it,
+    # just without a previous-track command.
+    previous_track = by_name.get("Audio Previous")
     volume = by_name.get("Audio Absolut volume")
     mute = by_name.get("Audio Mute")
     title = by_name.get("Audio Track name")
@@ -345,45 +468,47 @@ def _build_audio_media_player(
             call["data"] = data
         return call
 
+    commands: dict[str, dict[str, object]] = {
+        "turn_on": service("switch.turn_on", power),
+        "turn_off": service("switch.turn_off", power),
+        "media_play": service("switch.turn_on", play_pause),
+        "media_pause": service("switch.turn_off", play_pause),
+        # DPST-1-7 "step" (see _TRIGGER_DPTS): a momentary pulse, not a
+        # persistent state - modeled as `button` entities, pressed via
+        # the core button.press service. Per the official BAB
+        # AUDIOMODULE V3 documentation ("Media Server - Title +/-",
+        # EIS1), value 1 (this button's payload) means "next".
+        "media_next_track": service("button.press", next_track),
+        "volume_mute": service("switch.toggle", mute),
+    }
+    if previous_track is not None:
+        # Same group address as media_next_track (1/1/226), payload 0 -
+        # BAB's documented "previous" value for this object, see
+        # _apply_audio_module_semantics.
+        commands["media_previous_track"] = service("button.press", previous_track)
+    # "Audio Absolut volume" is rebuilt as a `light` (see
+    # _apply_audio_module_semantics) specifically so this can be a
+    # real write, not just a display - light.turn_on's brightness_pct
+    # (0-100) is HA's 0.0-1.0 volume_level * 100, clamped to [0, 100]
+    # in case a caller ever passes something out of range (KNX DPT
+    # 5.001 itself only accepts 0-100%).
+    commands["volume_set"] = service(
+        "light.turn_on",
+        volume,
+        {"brightness_pct": "{{ [0, [100, (volume_level * 100) | round(0)] | min] | max }}"},
+    )
+    # "Audio Playlist Select" is rebuilt as a `number` (see
+    # _apply_audio_module_semantics) so this can write the requested
+    # source through, not just display the current one. There is no
+    # known name<->index mapping in the source project, so `source` is
+    # expected to be that raw numeric index as a string, not a
+    # friendly playlist name.
+    commands["select_source"] = service("number.set_value", playlist, {"value": "{{ source }}"})
+
     return HaMediaPlayer(
         unique_id=f"{slug}_audio_module",
         name=f"{villa_name} Audio",
-        commands={
-            "turn_on": service("switch.turn_on", power),
-            "turn_off": service("switch.turn_off", power),
-            "media_play": service("switch.turn_on", play_pause),
-            "media_pause": service("switch.turn_off", play_pause),
-            # DPST-1-7 "step": a momentary pulse (see _TRIGGER_DPTS), not a
-            # persistent state - modeled as a `button`, pressed via the
-            # core button.press service. Value 1 (the button's default
-            # payload) conventionally means "increase"; the source project
-            # has no separate "previous" group address to map a
-            # previous-track command to.
-            "media_next_track": service("button.press", next_track),
-            "volume_mute": service("switch.toggle", mute),
-            # "Audio Absolut volume" is rebuilt as a `light` (see
-            # _apply_audio_module_semantics) specifically so this can be a
-            # real write, not just a display - light.turn_on's
-            # brightness_pct (0-100) is HA's 0.0-1.0 volume_level * 100,
-            # clamped to [0, 100] in case a caller ever passes something
-            # out of range (KNX DPT 5.001 itself only accepts 0-100%).
-            "volume_set": service(
-                "light.turn_on",
-                volume,
-                {
-                    "brightness_pct": (
-                        "{{ [0, [100, (volume_level * 100) | round(0)] | min] | max }}"
-                    )
-                },
-            ),
-            # "Audio Playlist Select" is rebuilt as a `number` (see
-            # _apply_audio_module_semantics) so this can write the
-            # requested source through, not just display the current one.
-            # There is no known name<->index mapping in the source
-            # project, so `source` is expected to be that raw numeric
-            # index as a string, not a friendly playlist name.
-            "select_source": service("number.set_value", playlist, {"value": "{{ source }}"}),
-        },
+        commands=commands,
         # Home Assistant's Universal Media Player cannot derive
         # playing/idle/off from multiple entities without state_template.
         # This is intentional.
@@ -513,20 +638,24 @@ def _build_welcome_automation(
 
 
 def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
-    """Build a one-view overview dashboard for a villa's package.
+    """Build an overview dashboard for a villa's package: one villa-wide
+    view (domain cards, scenes, scripts, media_player), plus one
+    additional view per ETS room (see _build_areas/HomeAssistantPackage.
+    areas) - the closest equivalent to a per-Area dashboard achievable at
+    all, since Home Assistant has no YAML mechanism to create real Areas.
 
     Entities with `entity_category` set (e.g. "Audio Absolut volume", see
     _apply_audio_module_semantics) are internal KNX implementation
     details, not something a resident should see in a "Lights"/etc. list
     - mirrors how HA's own default dashboard/area cards already exclude
-    `config`/`diagnostic` entities.
+    `config`/`diagnostic` entities. _build_areas already excludes them
+    from `package.areas` too, so the per-room views need no separate
+    filtering here.
     """
     cards = []
     for domain, title in _DASHBOARD_SECTIONS:
         entity_ids = tuple(
-            _entity_id(e)
-            for e in package.entities
-            if e.domain == domain and "entity_category" not in e.config
+            _entity_id(e) for e in package.entities if e.domain == domain and not _is_internal(e)
         )
         if entity_ids:
             cards.append(DashboardCard(title=title, entities=entity_ids))
@@ -556,8 +685,14 @@ def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
             )
         )
 
-    view = DashboardView(title=package.villa_name, cards=tuple(cards))
-    return Dashboard(villa_id=package.villa_id, title=package.villa_name, views=(view,))
+    views = [DashboardView(title=package.villa_name, cards=tuple(cards))]
+    for room in sorted(package.areas):
+        views.append(
+            DashboardView(
+                title=room, cards=(DashboardCard(title=room, entities=package.areas[room]),)
+            )
+        )
+    return Dashboard(villa_id=package.villa_id, title=package.villa_name, views=tuple(views))
 
 
 def _strip_villa_code(name: str) -> str:

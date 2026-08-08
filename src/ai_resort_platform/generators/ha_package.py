@@ -96,7 +96,16 @@ class HaAutomation:
 
 @dataclass(frozen=True, slots=True)
 class HomeAssistantPackage:
-    """Everything generated for one villa, merged as a single HA `packages/` file."""
+    """Everything generated for one villa, merged as a single HA `packages/` file.
+
+    `areas` maps each ETS room name to the entity_ids wired to a device
+    in that room - NOT real Home Assistant Areas: Home Assistant has no
+    YAML mechanism to create an Area or assign an entity to one, for any
+    integration (verified against official docs and HA maintainer
+    commentary - it's a UI/runtime-only registry, full stop). This is
+    used only to organize build_dashboard's per-room views; it is never
+    serialized into the KNX package YAML itself.
+    """
 
     villa_id: str
     villa_name: str
@@ -106,6 +115,7 @@ class HomeAssistantPackage:
     media_players: tuple[HaMediaPlayer, ...] = field(default_factory=tuple)
     template_sensors: tuple[HaTemplateSensor, ...] = field(default_factory=tuple)
     automations: tuple[HaAutomation, ...] = field(default_factory=tuple)
+    areas: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

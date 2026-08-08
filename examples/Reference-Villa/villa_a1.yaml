@@ -22,6 +22,7 @@ knx:
     address: 1/1/202
     brightness_address: 1/1/211
     entity_category: config
+    brightness_state_address: 1/1/212
   switch:
   - name: Stone Power
     address: 1/1/20
@@ -87,9 +88,6 @@ knx:
   - name: DMX Terrace Dimming
     type: percent
     state_address: 1/1/170
-  - name: Audio Volume
-    type: percent
-    state_address: 1/1/212
   - name: Audio Track name
     type: latin_1
     state_address: 1/1/231
@@ -102,6 +100,9 @@ knx:
   button:
   - name: Audio Next/Prev
     address: 1/1/226
+  - name: Audio Previous
+    address: 1/1/226
+    payload: '0'
   number:
   - name: Audio Playlist Select
     address: 1/1/239
@@ -170,11 +171,11 @@ media_player:
     turn_on:
       action: switch.turn_on
       target:
-        entity_id: switch.audio_power
+        entity_id: switch.audio_power_convert
     turn_off:
       action: switch.turn_off
       target:
-        entity_id: switch.audio_power
+        entity_id: switch.audio_power_convert
     media_play:
       action: switch.turn_on
       target:
@@ -191,6 +192,10 @@ media_player:
       action: switch.toggle
       target:
         entity_id: switch.audio_mute
+    media_previous_track:
+      action: button.press
+      target:
+        entity_id: button.audio_previous
     volume_set:
       action: light.turn_on
       target:
@@ -209,12 +214,41 @@ media_player:
     volume_level: sensor.villa_a1_audio_volume
     media_title: sensor.audio_track_name
     source: number.audio_playlist_select
-  state_template: "{% if is_state('switch.audio_power', 'off') %}\n  off\n{% elif\
-    \ is_state('switch.audio_play_pause', 'on') %}\n  playing\n{% else %}\n  idle\n\
-    {% endif %}"
+  state_template: "{% if is_state('switch.audio_power_convert', 'off') %}\n  off\n\
+    {% elif is_state('switch.audio_play_pause', 'on') %}\n  playing\n{% else %}\n\
+    \  idle\n{% endif %}"
 template:
 - sensor:
   - name: Villa A1 Audio Volume
     unique_id: villa_a1_audio_volume
     state: '{{ [0.0, [1.0, (state_attr(''light.audio_absolut_volume'', ''brightness'')
       | float(0)) / 255] | min] | max }}'
+automation:
+- alias: Villa A1 Welcome
+  triggers:
+  - trigger: state
+    entity_id: switch.guest
+    to: 'on'
+  actions:
+  - action: media_player.turn_on
+    target:
+      entity_id: media_player.villa_a1_audio
+  - action: media_player.select_source
+    target:
+      entity_id: media_player.villa_a1_audio
+    data:
+      source: '1'
+  - action: media_player.media_play
+    target:
+      entity_id: media_player.villa_a1_audio
+  - action: media_player.volume_set
+    target:
+      entity_id: media_player.villa_a1_audio
+    data:
+      volume_level: 0.5
+  - delay: 00:05:00
+  - action: media_player.select_source
+    target:
+      entity_id: media_player.villa_a1_audio
+    data:
+      source: '2'

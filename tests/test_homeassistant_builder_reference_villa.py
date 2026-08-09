@@ -345,13 +345,30 @@ def test_reference_villa_media_player_maps_every_requested_field():
         "source": "number.audio_playlist_select",
     }
     assert "state" not in media_player.attributes
-    # Off vs idle vs playing needs both "Audio Power Convert" (Power) and
+    # Off vs paused vs playing needs both "Audio Power Convert" (Power) and
     # "Audio Play/Pause" together - neither switch's own state alone is a
     # valid media_player state. Quoted so "audio_power" (Standby) can't
     # accidentally match as a substring of "audio_power_convert" (Power).
     assert "'switch.audio_power_convert'" in media_player.state_template
     assert "'switch.audio_power'" not in media_player.state_template
     assert "switch.audio_play_pause" in media_player.state_template
+
+
+def test_reference_villa_media_player_pauses_rather_than_idles():
+    """HA hides the transport buttons unless the state is playing/paused.
+
+    The frontend gates previous/next on the state, not only on the
+    supported-features flags, so an `idle` player that advertises
+    NEXT_TRACK/PREVIOUS_TRACK still renders a lone play button. `paused`
+    is also the truthful state: the module keeps a playlist loaded.
+    """
+    (media_player,) = _build().media_players
+
+    assert "paused" in media_player.state_template
+    assert "idle" not in media_player.state_template
+    # The two commands whose buttons the state was hiding.
+    assert "media_next_track" in media_player.commands
+    assert "media_previous_track" in media_player.commands
 
 
 def test_reference_villa_volume_level_sensor():

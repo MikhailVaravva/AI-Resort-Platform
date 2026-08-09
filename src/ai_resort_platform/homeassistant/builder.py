@@ -538,13 +538,32 @@ def _build_audio_media_player(
         # `universal` platform's plain attributes.state (a single bare
         # entity reference, no logic) can't express - state_template is
         # the documented mechanism for exactly this.
+        #
+        # The not-playing state is `paused`, not `idle`, and the
+        # difference is visible in the UI rather than cosmetic. Home
+        # Assistant's frontend renders the previous/next-track buttons
+        # only for `playing` and `paused`:
+        #
+        #     ("playing"===o||"paused"===o||n) && supportsFeature(t,16)
+        #         && s.push({action:"media_previous_track"})
+        #
+        # so an `idle` player advertising NEXT_TRACK/PREVIOUS_TRACK (which
+        # this one does - the `universal` platform derives both flags from
+        # the commands above) still shows a lone play button and no
+        # transport controls.
+        #
+        # `paused` is also the more accurate of the two: HA defines `idle`
+        # as on-but-nothing-loaded, while this module always has a
+        # playlist loaded and resumes it on play - Play/Pause being off is
+        # exactly a pause, which is what the underlying group address
+        # (1/1/222, EIS1 play/pause) means.
         state_template=(
             f"{{% if is_state('{_entity_id(power)}', 'off') %}}\n"
             "  off\n"
             f"{{% elif is_state('{_entity_id(play_pause)}', 'on') %}}\n"
             "  playing\n"
             "{% else %}\n"
-            "  idle\n"
+            "  paused\n"
             "{% endif %}"
         ),
         attributes={

@@ -16,6 +16,7 @@ generators/ha_package.py:HaAutomation).
 """
 
 import re
+from dataclasses import dataclass
 
 from ai_resort_platform.ets.group_addresses import GroupAddress
 from ai_resort_platform.ets.project import ETSProject
@@ -28,6 +29,7 @@ from ai_resort_platform.generators.ha_package import (
     HaMediaPlayer,
     HaScene,
     HaScript,
+    HaSelect,
     HaTemplateSensor,
     HomeAssistantPackage,
     RoomArea,
@@ -217,6 +219,49 @@ def _build_areas(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class AudioEqualizerAddresses:
+    """The BAB Audio Module's equalizer group addresses.
+
+    Passed in explicitly because they are **not in the ETS project**. The
+    module configures its own KNX interface through its web UI (Source
+    Management), and the reference installation has five such addresses
+    live on the bus but absent from ETS - the equalizer pair here, plus
+    Source Select (1/1/204), its callback (1/1/205) and Source Information
+    (1/1/206).
+
+    This does not weaken "ETSProject is the single source of truth": the
+    builder still invents nothing. It states instead that the ETS project
+    is not a complete description of the installation, so anything beyond
+    it has to be supplied by a caller who read it off the device, and be
+    visible as such at the call site.
+
+    The lasting fix is to add these addresses to the ETS project, after
+    which the normal ETSProject path picks them up and this parameter can
+    go away.
+    """
+
+    address: str
+    state_address: str | None = None
+
+
+# The equalizer presets exactly as the module's own Source Management page
+# lists them, in its order. EIS14 is one byte, and the payload is the
+# option's index in this list.
+AUDIO_EQUALIZER_PRESETS = (
+    "Without Optimisation",
+    "Bass Boost",
+    "Stereo Widening",
+    "Flat",
+    "Party",
+    "Pop",
+    "Rock",
+    "House",
+    "Speech",
+    "Mono",
+)
+
+
 def build_package(
     project: ETSProject,
     *,
@@ -224,6 +269,7 @@ def build_package(
     background_playlist: int | None = None,
     welcome_volume_percent: float = 50,
     welcome_to_background_delay: str = "00:05:00",
+    audio_equalizer: AudioEqualizerAddresses | None = None,
 ) -> HomeAssistantPackage:
     """Build one HomeAssistantPackage covering every group address in `project`.
 
@@ -244,6 +290,7 @@ def build_package(
         background_playlist=background_playlist,
         welcome_volume_percent=welcome_volume_percent,
         welcome_to_background_delay=welcome_to_background_delay,
+        audio_equalizer=audio_equalizer,
     )
 
 
@@ -286,6 +333,7 @@ def _build_package(
     background_playlist: int | None = None,
     welcome_volume_percent: float = 50,
     welcome_to_background_delay: str = "00:05:00",
+    audio_equalizer: AudioEqualizerAddresses | None = None,
 ) -> HomeAssistantPackage:
     villa_name = project.rooms[0].name if project.rooms else project.name
     slug = _slugify(villa_name)
@@ -313,6 +361,7 @@ def _build_package(
         background_delay=welcome_to_background_delay,
     )
     departure_automation = _build_departure_automation(slug, villa_name, tuple(entities))
+    selects = _build_equalizer_select(slug, villa_name, audio_equalizer)
     areas = _build_areas(project, group_addresses, tuple(entities), scenes)
 
     return HomeAssistantPackage(
@@ -320,11 +369,41 @@ def _build_package(
         villa_name=villa_name,
         entities=tuple(entities),
         scenes=scenes,
+        selects=selects,
         scripts=scripts,
         media_players=(media_player,) if media_player else (),
         template_sensors=(volume_level_sensor,) if volume_level_sensor else (),
         automations=tuple(a for a in (welcome_automation, departure_automation) if a is not None),
         areas=areas,
+    )
+
+
+def _build_equalizer_select(
+    slug: str, villa_name: str, addresses: AudioEqualizerAddresses | None
+) -> tuple[HaSelect, ...]:
+    """The audio module's equalizer, as a KNX `select`.
+
+    Empty unless a caller supplies the addresses - they are not in the ETS
+    project, so there is nothing here to derive them from (see
+    AudioEqualizerAddresses).
+
+    A `select` rather than a `number`: the value is an enumeration of ten
+    named presets, and a select can only ever write one of the ten
+    payloads it defines, where a raw 0-255 number would let an out-of-range
+    value reach a real audio system.
+    """
+    if addresses is None:
+        return ()
+    return (
+        HaSelect(
+            unique_id=f"{slug}_audio_equalizer",
+            name=f"{villa_name} Audio Equalizer",
+            address=addresses.address,
+            state_address=addresses.state_address,
+            options=AUDIO_EQUALIZER_PRESETS,
+            # EIS14, per the module's own labelling of both addresses.
+            payload_length=1,
+        ),
     )
 
 

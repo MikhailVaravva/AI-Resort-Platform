@@ -123,6 +123,26 @@ class RoomArea:
 
 
 @dataclass(frozen=True, slots=True)
+class HaSelect:
+    """One Home Assistant KNX `select` entity - a named list of payloads.
+
+    Its own dataclass rather than an HaEntity for the same reason HaScene
+    is: `options` is not a group address, and HaEntity.config is a flat
+    address map by design.
+
+    `options` is ordered, and an option's index is the payload written to
+    the bus. `payload_length` is in bytes (1 for EIS14).
+    """
+
+    unique_id: str
+    name: str
+    address: str
+    options: tuple[str, ...]
+    state_address: str | None = None
+    payload_length: int = 1
+
+
+@dataclass(frozen=True, slots=True)
 class HomeAssistantPackage:
     """Everything generated for one villa, merged as a single HA `packages/` file.
 
@@ -140,6 +160,7 @@ class HomeAssistantPackage:
     villa_name: str
     entities: tuple[HaEntity, ...] = field(default_factory=tuple)
     scenes: tuple[HaScene, ...] = field(default_factory=tuple)
+    selects: tuple[HaSelect, ...] = field(default_factory=tuple)
     scripts: tuple[HaScript, ...] = field(default_factory=tuple)
     media_players: tuple[HaMediaPlayer, ...] = field(default_factory=tuple)
     template_sensors: tuple[HaTemplateSensor, ...] = field(default_factory=tuple)

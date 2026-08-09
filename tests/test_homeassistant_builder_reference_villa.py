@@ -521,3 +521,28 @@ def test_reference_villa_welcome_automation_yaml_structure():
     assert "trigger" not in automation
     assert "action" not in automation
     assert data["automation"][1]["alias"] == "Villa A1 Departure"
+
+
+def test_reference_villa_has_no_equalizer_without_explicit_addresses():
+    """1/1/200 and 1/1/201 are configured in the module but absent from the
+    ETS project, so the default build cannot and must not invent them."""
+    assert _build().selects == ()
+
+
+def test_reference_villa_equalizer_is_built_when_addresses_are_supplied():
+    from ai_resort_platform.homeassistant.builder import (
+        AUDIO_EQUALIZER_PRESETS,
+        AudioEqualizerAddresses,
+    )
+
+    project = ETSProject.open(REFERENCE_VILLA, password="12345")
+    package = build_package(
+        project,
+        audio_equalizer=AudioEqualizerAddresses(address="1/1/200", state_address="1/1/201"),
+    )
+
+    (select,) = package.selects
+    assert select.name == "Villa A1 Audio Equalizer"
+    assert select.address == "1/1/200"
+    assert select.state_address == "1/1/201"
+    assert select.options == AUDIO_EQUALIZER_PRESETS

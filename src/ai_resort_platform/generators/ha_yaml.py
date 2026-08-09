@@ -9,6 +9,7 @@ from ai_resort_platform.generators.ha_package import (
     DashboardView,
     HaEntity,
     HaMediaPlayer,
+    HaSelect,
     HaTemplateSensor,
     HomeAssistantPackage,
 )
@@ -47,6 +48,9 @@ def package_to_yaml(package: HomeAssistantPackage) -> str:
             for scene in package.scenes
         ]
 
+    if package.selects:
+        knx["select"] = [_select_dict(select) for select in package.selects]
+
     if knx:
         data["knx"] = knx
 
@@ -84,6 +88,25 @@ def package_to_yaml(package: HomeAssistantPackage) -> str:
 
 def _entity_dict(entity: HaEntity) -> dict[str, Any]:
     return {"name": entity.name, **entity.config}
+
+
+def _select_dict(select: HaSelect) -> dict[str, Any]:
+    """`knx: select:` (home-assistant.io/integrations/knx/#select).
+
+    Each option carries its own explicit `payload`; the KNX platform has no
+    notion of an implicit ordering, so the index has to be written out.
+    """
+    config: dict[str, Any] = {
+        "name": select.name,
+        "address": select.address,
+        "payload_length": select.payload_length,
+        "options": [
+            {"option": option, "payload": payload} for payload, option in enumerate(select.options)
+        ],
+    }
+    if select.state_address:
+        config["state_address"] = select.state_address
+    return config
 
 
 def _media_player_dict(media_player: HaMediaPlayer) -> dict[str, Any]:

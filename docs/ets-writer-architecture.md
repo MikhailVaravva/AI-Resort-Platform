@@ -1,44 +1,43 @@
-# ETS Writer — architecture (Step 6, design only)
+# ETS Writer — architecture (Step 6)
 
-No writing is implemented in this step. Every interface below has a body of
-`raise NotImplementedError`. This document explains *why* the architecture
-is shaped the way it is, since several requirements (identity, GUIDs,
-lossless round-trip) only make sense in light of one hard constraint stated
-plainly here first.
+No *writing* is implemented yet: `EtsSerializer` and `EtsWriter` are still
+`raise NotImplementedError`. The two stages that need no knowledge of the
+project file format — `ProjectDiffer` (§4) and `IdentityStrategy` (§6) —
+are implemented, along with the datapoint-type lookup (§10). This document
+explains *why* the architecture is shaped the way it is, since several
+requirements (identity, GUIDs, lossless round-trip) only make sense in
+light of one constraint that shaped all of them.
 
-## 0. The constraint this whole design is built around
+## 0. The constraint this design was built around — since lifted
 
-**We have never opened a real `project.xml`.** Step 1 found the reference
-`.knxproj`'s inner project archive (`P-035B.zip`) is AES-encrypted, never
-got a working password, and Step 1's own review redirected the whole
-Reader/ProjectModel/DigitalTwin pipeline to consume ETS's **Semantic
-Export** (JSON-LD) instead — a real, official, but *different* ETS output
-format from the internal project XML. Every field our `ProjectModel` and
-`DigitalTwin` carry today came from that JSON-LD graph, not from
-`project.xml`.
+**When this was written, we had never opened a real `project.xml`.** Step 1
+found the reference `.knxproj`'s inner project archive (`P-035B.zip`) is
+AES-encrypted, never got a working password, and Step 1's own review
+redirected the whole Reader/ProjectModel/DigitalTwin pipeline to consume
+ETS's **Semantic Export** (JSON-LD) instead — a real, official, but
+*different* ETS output format from the internal project XML. Every field
+our `ProjectModel` and `DigitalTwin` carry today still comes from that
+JSON-LD graph.
 
-This means:
+That constraint no longer holds: the reference project has since been
+decrypted and read directly, and §18 records what it actually contains.
+Two of the assumptions this section flagged turned out to be wrong — the
+installation lives in `0.xml` rather than `project.xml`, and export ids
+are *not* equal to internal ids (they map onto them by a fixed rule). Both
+corrections are in §18.1.
 
-- We know KNX Association publishes a versioned "KNX XML Project Schema"
-  (XSD) for `project.xml`, but only through KNX GitLab / Manufacturer Tool
-  access we don't have — not something we can currently verify against.
-- Object ids we carry (`GroupAddress.id`, `Device.id`, e.g. `"prj:GA-266"`,
-  `"prj:DI-55"`) are the Semantic Export's node ids. They almost certainly
-  correspond to `project.xml`'s real internal `Id` attributes (the naming
-  pattern matches ETS's known `P-<projectId>-0_<LocalId>` convention
-  observed elsewhere in the same archive), but this is an **assumption**,
-  not something we've confirmed by reading both formats side by side.
-- We do not know the exact XML element/attribute names, nesting, or
-  whether `project.xml` is itself further checksummed or signed.
-
-**Every "strategy" below is designed to be correct in shape without
-depending on facts we don't have** — and every place a real fact is
-required, it's flagged as an open risk in §18, not guessed at. The
-alternative (guessing the schema and writing something that merely *looks*
-plausible) would produce a Writer that appears to work and then corrupts a
-real installation's project the first time ETS opens it. Given the earlier
-false starts with password guessing on the reference project, this design
-does not repeat that mistake.
+**The section is kept rather than deleted, because the design decisions it
+produced are the ones that survived contact with the real file.** Every
+strategy below was written to be correct in shape without depending on
+facts we did not have — and where a fact was needed it was flagged in §18
+instead of guessed. That discipline is why the two implemented stages
+needed no rework when the real schema arrived: `IdentityStrategy` observes
+each project's id shape instead of hardcoding `prj:`, so it kept working
+once the true `P-035B-0_GA-266` form appeared, and the datapoint lookup
+derives itself from `knx_master.xml` rather than freezing a table. The
+alternative — guessing the schema and writing something that merely
+*looks* plausible — would have produced a Writer that appears to work and
+then corrupts a real installation the first time ETS opens it.
 
 ## 1. Guiding principle: patch, don't regenerate
 
@@ -124,15 +123,24 @@ Two things to notice:
 `generators/ets/writer.py` contain the actual typed contracts. Summary:
 
 - `ProjectDiffer.diff(original, updated) -> ProjectChangeSet` — §4.
+  Implemented by `ModelProjectDiffer` in `generators/ets/differ.py`.
 - `IdentityStrategy.mint_id(object_kind, base_project) -> str` — §6.
+  Implemented by `SequentialIdentityStrategy` in `generators/ets/identity.py`.
 - `EtsSerializer.serialize(change_set, base_project) -> SerializedProject` — §4.
+  Not implemented: blocked on §18.2.
 - `EtsWriter.write(base_project_path, change_set, output_path) -> WriteResult` — §5, the single entry point.
+  Not implemented: blocked on §18.2.
+
+The split is not arbitrary. The first two stages only ever read a
+`ProjectModel`, so they are correct under either strategy in §19 and were
+buildable before the project format was known; the last two touch the file
+and are not.
 
 All four are `abc.ABC`, matching every prior pluggable-strategy interface
 in this codebase (`InputReader`/`ProjectImporter` in the reader layer,
 `AddressAllocator`/`CloneValidator`/`ConflictDetector`/`CloneEngine` in
 Step 5). This isn't cosmetic consistency — it's what makes the two
-implementation strategies in §17 swappable behind the same `EtsWriter`
+implementation strategies in §19 swappable behind the same `EtsWriter`
 contract.
 
 ## 4. Serialization pipeline
@@ -239,8 +247,15 @@ independently authored by this platform.** A device's communication
 objects are defined by its application program (manufacturer XML) — fixed,
 numbered, typed by the product itself. What our Writer actually controls
 is which *group addresses* get connected to which of a device's
-(pre-existing, product-defined) communication objects — i.e. the `Connectors`/
-`Send`/`Receive` links, not the communication objects themselves.
+(pre-existing, product-defined) communication objects — the links, not the
+communication objects themselves.
+
+**Correction (§18):** those links were guessed here as `Connectors`/`Send`/
+`Receive` child elements. In the real file they are a single space-separated
+`Links` attribute on `ComObjectInstanceRef`, holding *short* group-address
+ids: `<ComObjectInstanceRef RefId="O-1_R-1" Links="GA-292 GA-668 GA-716"/>`.
+The conclusion above is unaffected — only the XML shape the Serializer has
+to emit is.
 
 Consequence for cloning: a cloned device reuses the *exact same* product
 reference as its source (§8), which means it automatically has the exact
@@ -260,9 +275,14 @@ description, DPT reference, security mode), emit the correct `project.xml`
 element/attributes for it, and (§9) wire its connections. `datapoint_type`
 on our `GroupAddress` model is currently the Semantic Export's short DPT
 name (e.g. `"switch"`) rather than a `knx_master.xml` DPT id (e.g.
-`DPST-1-1`) — the Serializer needs a lookup table between the two, which
-does not yet exist anywhere in this codebase (another concrete, scoped gap
-for implementation, not a guess made now).
+`DPST-1-1`). **Resolved** — `generators/ets/datapoints.py` derives that
+lookup from the `knx_master.xml` inside the project being edited instead
+of hardcoding a table: a `DatapointSubtype`'s `Name` ("DPT_Switch"),
+stripped of its prefix and lower-camel-cased, *is* the export's short name
+("switch"); `Text` is not (DPST-5-1's `Text` is "percentage (0..100%)"
+where the export says "scaling"). A major-only `major.<n>.x` resolves to
+`DPT-<n>`. Verified against every datapoint type the reference project
+uses — see §18.
 
 ## 11. Topology serialization
 
@@ -389,33 +409,91 @@ Every row reduces to the same `ProjectChangeSet` shape flowing through the
 same pipeline — this table is really showing that seven different
 product-level features are all one architecture, not seven.
 
-## 18. Open risks — require real schema/data before implementation
+## 18. Risks — four closed against the real project, two still open
 
-Stated once here rather than scattered, so a reviewer can see the whole
-risk surface in one place:
+This section originally listed six risks, all of them consequences of one
+fact: nobody had opened a real `project.xml`. The reference project has
+since been decrypted with its password and inspected (schema version 23,
+namespace `http://knx.org/xml/project/23`, written by ETS 6.4.8718.0), so
+most of the list is now measurement rather than inference.
 
-1. **We have never parsed a real `project.xml`.** Every structural
-   assumption above (element names, `Id` format, nesting) is inferred from
-   the Semantic Export's shape and general KNX/ETS knowledge, not verified
-   against the actual internal format.
-2. Whether Semantic Export node ids (`"prj:GA-266"`) actually equal the
-   internal `project.xml` `Id` values, or merely resemble them, is
-   unconfirmed.
-3. Whether the project sub-archive's cryptographic signature/certificate
-   survives a hand-patched `project.xml`, or whether the Writer needs to
-   re-sign (and with what key/authority), is unknown.
-4. The `datapoint_type` short-name -> `knx_master.xml` DPT-id mapping
-   (§10) doesn't exist in this codebase yet.
-5. Version-dependent schema differences beyond the one confirmed fact
-   (§15) are unresearched.
-6. Exact KNX scene XML shape (§17) is unconfirmed.
+### 18.1 Closed
 
-**Recommended path to close these:** either (a) obtain a real, unencrypted
-sample `project.xml` (or the actual project password) to inspect directly,
-or acquire the official KNX XML Project Schema via KNX Association
-GitLab/Manufacturer Tool access; or (b) pursue the alternative
-implementation strategy in §19 below, which sidesteps all six risks by
-construction.
+**Risk 1 — never parsed a real `project.xml`. Closed, with a correction to
+where the data lives.** The installation is in `0.xml`, not `project.xml`:
+for the reference project `0.xml` is 116 KB holding all 62 `GroupAddress`,
+7 `DeviceInstance`, 121 `ComObjectInstanceRef` and 524
+`ParameterInstanceRef` elements, while `project.xml` is 4.9 MB of which
+essentially all is 18,643 `ProjectTrace` entries — an edit history — plus
+`ProjectInformation` and `DeviceCertificates`. Everything §4/§5 describe
+as patching "`project.xml`/`0.xml`" is in practice `0.xml`. Confirmed
+structure:
+
+| Concern | Real shape |
+|---|---|
+| Rooms | `Space` with `Type="Building"\|"BuildingPart"\|"Floor"\|"Room"`, under `Locations` — not `BuildingPart` elements |
+| Group address | `<GroupAddress Id Address Name Description DatapointType [Key] Puid/>` |
+| Address encoding | a plain integer (`2304` = `1/1/0`), the same encoding `JsonLdImporter._decode_group_address` already handles |
+| Device | `<DeviceInstance Id Address ProductRefId Hardware2ProgramRefId .../>` |
+| GA ↔ com-object links | a `Links` attribute on `ComObjectInstanceRef` (§9) |
+| Parameters | `<ParameterInstanceRef RefId="M-0085_A-0046-10-8B07_P-9778_R-9778" Value="2"/>` |
+| Group ranges | `GroupRange` with `RangeStart`/`RangeEnd` |
+
+Every object also carries a `Puid` alongside its `Id`. What a `Puid` is
+authoritative for, and whether a created object needs one, is **not**
+answered by inspection alone — see 18.2.
+
+**Risk 2 — do export ids equal internal ids? Closed: they do not, but the
+mapping is mechanical.** The export writes `prj:GA-266`; the file writes
+`P-035B-0_GA-266`, i.e. `P-<installation code>-<installation number>_` in
+place of `prj:`. The numeric suffix is preserved, and the rule resolves
+62/62 group addresses, 7/7 devices and 1/1 room of the reference project.
+Note that *two* id forms coexist in one file: `Links` (§9) uses the short
+`GA-292` form while `Id`/`RefId` use the long one.
+
+This is why §6's `IdentityStrategy` observes each project's own id shape
+instead of hardcoding one — `SequentialIdentityStrategy` keeps minting
+correctly when the Reader switches from export ids to `.knxproj` ids,
+which a hardcoded `prj:` prefix would not have.
+
+**Risk 4 — the DPT lookup table. Closed and implemented**, see §10 and
+`generators/ets/datapoints.py`.
+
+**Risk 6 — scene XML shape. Not closed; withdrawn as unmeasurable here.**
+The reference project contains no scene elements at all, so this file
+cannot answer it. It moves to 18.2 rather than counting as resolved.
+
+### 18.2 Still open
+
+1. **Signatures (was risk 3, unchanged).** Whether a hand-patched `0.xml`
+   survives the project archive's signature/certificate, or whether the
+   Writer must re-sign and with what authority, is still unknown — and is
+   now the single biggest risk to strategy A, since everything else it
+   needed is measured. The archive carries `.signature` files per
+   manufacturer folder, a `P-XXXX.certificate` and a `DeviceCertificates`
+   block, none of which have been tested against modification.
+2. **Version differences (was risk 5, unchanged).** One project, one
+   schema version (23). Nothing here says how ETS 5 or a future ETS 6
+   minor differs.
+3. **Scene XML shape (was risk 6).** Needs a project that actually uses
+   scenes.
+4. **Device download state.** New, and not previously on the list.
+   `DeviceInstance` carries `ApplicationProgramLoaded`,
+   `ParametersLoaded`, `CommunicationPartLoaded`,
+   `IndividualAddressLoaded`, `CheckSums`, `LoadedImage`, `LastDownload`
+   and a `Security`/`ToolKey` block. These describe what is *currently
+   programmed into the physical device*. A Writer that edits a device
+   without invalidating them would produce a project ETS believes is in
+   sync with hardware that no longer matches it. Which of these to clear
+   on which kind of edit is unresearched.
+5. **`Puid` semantics.** Every object has one; whether it must be unique,
+   sequential, or minted at all for a created object is unknown. §6's
+   `IdentityStrategy` currently mints `Id` only.
+
+**Path to close the rest:** (1) and (4) are the ones that block strategy A
+and both are answerable experimentally — patch a copy, reopen it in ETS,
+observe. (2) needs another project; (3) needs a project with scenes. Note
+that strategy B (§19) still sidesteps all five by construction.
 
 ## 19. Two implementation strategies the interfaces support
 
@@ -423,8 +501,10 @@ Both fit behind the exact same `EtsWriter` interface (§3) - the risks in
 §18 are what should decide which one gets built first, not this document.
 
 - **A. Direct XML patching** (what §4/§5 describe in most detail): we parse
-  and rewrite `project.xml` ourselves. Full control, but carries every risk
-  in §18.
+  and rewrite `0.xml` ourselves. Full control. Cheaper than it looked when
+  this was written — §18.1 measured the structure it needs — but it now
+  stands or falls on the two open risks in §18.2 that only it has:
+  signatures, and device download state.
 - **B. ETS App SDK.** Step 1's research surfaced the official "ETS Apps"
   SDK (C#/.NET, "guaranteed software access to ETS resources") for
   building tools that run *inside* ETS. A Writer built this way asks ETS

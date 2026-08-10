@@ -278,6 +278,52 @@ AUDIO_EQUALIZER_PRESETS: tuple[tuple[str, int], ...] = (
 )
 
 
+class VillaNotFoundError(ValueError):
+    """Raised for a villa name the project has no room for."""
+
+
+def villa_group_addresses(project: ETSProject, villa: str) -> tuple[GroupAddress, ...]:
+    """The group addresses belonging to one villa.
+
+    A resort project holds every villa at once - twelve rooms and 843
+    group addresses in the reference one - so a package built from it
+    without scoping describes all of them together. This is what makes a
+    per-villa build possible.
+
+    The rule is the KNX topology, not the naming: a villa's devices sit on
+    their own line, and its group addresses live in the main/middle group
+    that matches it. Villa A1's devices are 1.1.x and its addresses are
+    1/1/x; villa D2's are 4.2.x and 4/2/x.
+
+    Two alternatives were measured against the reference project and
+    rejected. Following the devices' communication objects reaches only
+    65% of the addresses - the rest are linked to nothing, and a third of
+    the villa would have gone missing silently. Matching the "A1 " name
+    prefix reaches 90%, and depends on a convention that eleven of the
+    twelve villas did not follow until it was normalised. The line rule
+    reaches 786 of 843, and the remainder are in 1/5-1/7, which belong to
+    no villa at all.
+    """
+    room = next((r for r in project.rooms if r.name == villa), None)
+    if room is None:
+        raise VillaNotFoundError(
+            f"{villa!r} is not a room in this project; it has "
+            f"{sorted(r.name for r in project.rooms)}"
+        )
+
+    devices = {d.individual_address: d for d in project.devices}
+    lines = {
+        ".".join(devices[i].individual_address.split(".")[:2])
+        for i in room.device_ids
+        if i in devices
+    }
+    if not lines:
+        raise VillaNotFoundError(f"{villa!r} has no devices, so its line cannot be determined")
+
+    middles = {line.replace(".", "/") for line in lines}
+    return tuple(ga for ga in project.group_addresses if ga.address.rsplit("/", 1)[0] in middles)
+
+
 def build_package(
     project: ETSProject,
     *,
@@ -289,8 +335,14 @@ def build_package(
     audio_media_source: str | None = None,
     unresponsive_addresses: tuple[str, ...] = (),
     answers_read_requests: bool = True,
+    villa: str | None = None,
 ) -> HomeAssistantPackage:
-    """Build one HomeAssistantPackage covering every group address in `project`.
+    """Build one HomeAssistantPackage from `project`.
+
+    `villa` names the room to build, for a project holding more than one -
+    see villa_group_addresses. Without it the whole project goes into one
+    package, which is right for a single-villa export and wrong for a
+    resort's.
 
     unique_ids are scoped to the villa's room name (e.g. "Villa A1"), not the
     whole project name ("Hot Stone VILLA") - matching the old DigitalTwin
@@ -317,7 +369,8 @@ def build_package(
     """
     return _build_package(
         project,
-        project.group_addresses,
+        villa_group_addresses(project, villa) if villa else project.group_addresses,
+        villa_name=villa,
         welcome_playlist=welcome_playlist,
         background_playlist=background_playlist,
         welcome_volume_percent=welcome_volume_percent,
@@ -364,6 +417,7 @@ def _build_package(
     project: ETSProject,
     group_addresses: tuple[GroupAddress, ...],
     *,
+    villa_name: str | None = None,
     welcome_playlist: int | None = None,
     background_playlist: int | None = None,
     welcome_volume_percent: float = 50,
@@ -373,7 +427,7 @@ def _build_package(
     unresponsive_addresses: tuple[str, ...] = (),
     answers_read_requests: bool = True,
 ) -> HomeAssistantPackage:
-    villa_name = project.rooms[0].name if project.rooms else project.name
+    villa_name = villa_name or (project.rooms[0].name if project.rooms else project.name)
     slug = _slugify(villa_name)
     cover_source, after_cover = _extract_cover_group_addresses(group_addresses)
     scenes, scripts, remaining = _extract_scenes(slug, after_cover)

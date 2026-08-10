@@ -34,6 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _describe(deployment: Deployment) -> list[str]:
     lines = [f"project:  {deployment.project_path}"]
+    if deployment.villa:
+        lines.append(f"villa:        {deployment.villa}")
     if deployment.audio_media_source:
         lines.append(f"media source: {deployment.audio_media_source}")
     if not deployment.answers_read_requests:
@@ -62,6 +64,7 @@ def _build(recipe: Path, dry_run: bool) -> int:
         audio_media_source=deployment.audio_media_source,
         unresponsive_addresses=deployment.unresponsive_addresses,
         answers_read_requests=deployment.answers_read_requests,
+        villa=deployment.villa,
     )
 
     for line in _describe(deployment):

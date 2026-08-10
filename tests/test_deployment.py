@@ -135,3 +135,16 @@ def test_no_recipe_carries_a_password_value():
         text = recipe.read_text(encoding="utf-8")
         assert "password =" not in text, recipe
         assert "password_env" in text or "path" in text
+
+
+def test_the_resort_recipe_names_a_villa():
+    """A recipe on the resort project without one would build all twelve
+    villas into a single package."""
+    from pathlib import Path
+
+    recipe = Path(__file__).resolve().parent.parent / "deployments" / "hot_stone_villa_a1.toml"
+    d = load_deployment(recipe)
+
+    assert d.villa == "Villa A1"
+    assert d.project_path.name == "hot_stone.knxproj"
+    assert d.password_env

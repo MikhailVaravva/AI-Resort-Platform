@@ -33,6 +33,7 @@ class Deployment:
 
     project_path: Path
     password_env: str | None = None
+    villa: str | None = None
     welcome_playlist: int | None = None
     background_playlist: int | None = None
     welcome_volume_percent: float = 50
@@ -84,6 +85,7 @@ def load_deployment(path: Path) -> Deployment:
     return Deployment(
         project_path=resolve(project["path"]),
         password_env=project.get("password_env"),
+        villa=project.get("villa"),
         welcome_playlist=package.get("welcome_playlist"),
         background_playlist=package.get("background_playlist"),
         welcome_volume_percent=package.get("welcome_volume_percent", 50),

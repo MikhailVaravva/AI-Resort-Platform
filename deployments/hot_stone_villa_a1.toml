@@ -1,0 +1,30 @@
+# Villa A1, built from the resort project rather than a single-villa
+# export. The two describe the same villa; this one is the source of
+# truth for the whole complex, so a change made in ETS reaches every
+# villa's package from one file.
+#
+#   ai-resort-platform build deployments/hot_stone_villa_a1.toml
+
+[project]
+path = "../examples/Hot-Stone/hot_stone.knxproj"
+password_env = "HOT_STONE_KNXPROJ_PASSWORD"
+# Which room to build. Without it the package would describe all twelve
+# villas at once - see villa_group_addresses.
+villa = "Villa A1"
+
+[package]
+welcome_playlist = 1
+background_playlist = 2
+audio_media_source = "media_player.192_168_1_17"
+
+# The audio module reports these on change and answers no read - measured
+# over 1475 telegrams with not one GroupValueResponse. The rest of the bus
+# is deliberately still polled: when that was measured, the other devices
+# were not physically connected, so their silence said nothing about them.
+unresponsive_addresses = [
+  "1/1/203", "1/1/212", "1/1/221", "1/1/223", "1/1/231",
+]
+
+[output]
+package = "../homeassistant/packages/villa_a1.yaml"
+dashboard = "../homeassistant/villa_a1_dashboard.yaml"

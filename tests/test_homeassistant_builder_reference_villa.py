@@ -278,21 +278,24 @@ def test_reference_villa_audio_module_package_excludes_touch_panel_mirrors():
     }
 
 
-def test_reference_villa_audio_module_package_yaml_round_trips():
-    """No `media_player` here: "Audio Power Convert" (the real Power
-    ON/OFF function, see _build_audio_media_player) has no communication
-    object on the Audio Module device itself - only on the touch panel -
-    so build_audio_module_package's device-scoped filter never includes
-    it, and the media_player can't be built without it (same as any
-    other missing required entity)."""
+def test_reference_villa_audio_module_package_has_a_media_player():
+    """The device-scoped package builds a full media_player.
+
+    It did not while Power was taken from "Audio Power Convert"
+    (1/1/240/241), which is the touch panel's logic and has no
+    communication object on the Audio Module, so the device-scoped filter
+    always dropped it. Power is now "Audio Power" (1/1/202, the module's
+    own Standby object), which the module does own - see
+    _build_audio_media_player."""
     project = ETSProject.open(REFERENCE_VILLA, password="12345")
     package = build_audio_module_package(project)
 
-    assert package.media_players == ()
+    (media_player,) = package.media_players
+    assert media_player.commands["turn_on"]["target"] == {"entity_id": "switch.audio_power"}
 
     data = yaml.safe_load(package_to_yaml(package))
 
-    assert set(data.keys()) == {"knx", "template"}
+    assert set(data.keys()) == {"knx", "template", "media_player"}
     assert set(data["knx"].keys()) == {"switch", "sensor", "light", "button", "number"}
 
 
@@ -305,12 +308,13 @@ def test_reference_villa_media_player_maps_every_requested_field():
     assert media_player.name == "Villa A1 Audio"
 
     commands = media_player.commands
-    # "Audio Power Convert" (1/1/240 command, 1/1/241 status) is the real
-    # Power ON/OFF function, confirmed against the BAB Audio Module's own
-    # documentation - "Audio Power" (1/1/202/1/1/203) is a separate
-    # Standby function, deliberately not used by the media_player at all.
-    assert commands["turn_on"]["target"] == {"entity_id": "switch.audio_power_convert"}
-    assert commands["turn_off"]["target"] == {"entity_id": "switch.audio_power_convert"}
+    # Power is "Audio Power" (1/1/202/1/1/203) - the module's own Standby
+    # object, the only power object its documentation defines. "Audio
+    # Power Convert" (1/1/240/241) is the touch panel's logic and must not
+    # be driven from here.
+    assert commands["turn_on"]["target"] == {"entity_id": "switch.audio_power"}
+    assert commands["turn_off"]["target"] == {"entity_id": "switch.audio_power"}
+    assert "audio_power_convert" not in str(commands)
     assert commands["media_play"]["target"] == {"entity_id": "switch.audio_play_pause"}
     assert commands["media_pause"]["target"] == {"entity_id": "switch.audio_play_pause"}
     assert commands["media_next_track"] == {
@@ -345,12 +349,12 @@ def test_reference_villa_media_player_maps_every_requested_field():
         "source": "number.audio_playlist_select",
     }
     assert "state" not in media_player.attributes
-    # Off vs paused vs playing needs both "Audio Power Convert" (Power) and
+    # Off vs paused vs playing needs both "Audio Power" (1/1/202) and
     # "Audio Play/Pause" together - neither switch's own state alone is a
-    # valid media_player state. Quoted so "audio_power" (Standby) can't
-    # accidentally match as a substring of "audio_power_convert" (Power).
-    assert "'switch.audio_power_convert'" in media_player.state_template
-    assert "'switch.audio_power'" not in media_player.state_template
+    # valid media_player state. Quoted so the assertion can't be satisfied
+    # by "audio_power_convert", which merely starts with the same text.
+    assert "'switch.audio_power'" in media_player.state_template
+    assert "audio_power_convert" not in media_player.state_template
     assert "switch.audio_play_pause" in media_player.state_template
 
 

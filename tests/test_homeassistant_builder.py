@@ -362,13 +362,12 @@ def test_audio_module_package_only_includes_group_addresses_wired_to_the_module(
 
 def _audio_module_gas() -> tuple[GroupAddress, ...]:
     return (
-        # "Audio Power" (Standby, per the real BAB Audio Module docs) -
-        # its own independent switch, never referenced by the
-        # media_player (see _build_audio_media_player).
+        # "Audio Power" (1/1/202) is the module's Standby object and the
+        # only power object its documentation defines - the media_player
+        # drives this one (see _build_audio_media_player).
         GroupAddress(id="1", address="1/1/202", name="A1 Audio Power", dpt_main=1, dpt_sub=1),
-        # "Audio Power Convert" is the real Power ON/OFF function the
-        # media_player uses - a different function from "Audio Power"
-        # (Standby) above, per the real BAB Audio Module docs.
+        # "Audio Power Convert" is the touch panel's logic, kept here only
+        # so the tests prove the media_player leaves it alone.
         GroupAddress(
             id="8", address="1/1/240", name="A1 Audio Power Convert", dpt_main=1, dpt_sub=1
         ),
@@ -528,15 +527,15 @@ def test_media_player_is_built_when_every_source_entity_is_present():
     assert media_player.unique_id == "hot_stone_villa_audio_module"
     assert media_player.name == "Hot Stone VILLA Audio"
     assert media_player.commands == {
-        # "Audio Power Convert" (Power ON/OFF), not "Audio Power"
-        # (Standby) - see _build_audio_media_player.
+        # "Audio Power" (1/1/202, the module's own Standby object), never
+        # "Audio Power Convert" - see _build_audio_media_player.
         "turn_on": {
             "action": "switch.turn_on",
-            "target": {"entity_id": "switch.audio_power_convert"},
+            "target": {"entity_id": "switch.audio_power"},
         },
         "turn_off": {
             "action": "switch.turn_off",
-            "target": {"entity_id": "switch.audio_power_convert"},
+            "target": {"entity_id": "switch.audio_power"},
         },
         "media_play": {
             "action": "switch.turn_on",
@@ -590,10 +589,10 @@ def test_media_player_is_built_when_every_source_entity_is_present():
         "source": "number.audio_playlist_select",
     }
     assert "state" not in media_player.attributes
-    # Quoted so "audio_power" (Standby) can't accidentally match as a
-    # substring of "audio_power_convert" (Power).
-    assert "'switch.audio_power_convert'" in media_player.state_template
-    assert "'switch.audio_power'" not in media_player.state_template
+    # Quoted so the assertion can't be satisfied by
+    # "audio_power_convert", which merely starts with the same text.
+    assert "'switch.audio_power'" in media_player.state_template
+    assert "audio_power_convert" not in media_player.state_template
     assert "switch.audio_play_pause" in media_player.state_template
 
 
@@ -728,10 +727,10 @@ def test_welcome_automation_respects_custom_volume_and_delay():
 
 
 def test_departure_automation_puts_audio_module_into_standby():
-    """ "Guest" -> off sends Standby's own command GA (1/1/202, "Audio
-    Power" - see the BAB capability matrix), never "Audio Power Convert"
-    (Power, 1/1/240) and never through the media_player, since Standby was
-    deliberately never wired into it (see _build_audio_media_player)."""
+    """ "Guest" -> off sends the module's Standby command GA (1/1/202,
+    "Audio Power") directly rather than through the media_player, and
+    never touches "Audio Power Convert" (1/1/240), which belongs to the
+    touch panel."""
     gas = _audio_module_gas() + (_guest_ga(),)
     project = _project(gas)
 

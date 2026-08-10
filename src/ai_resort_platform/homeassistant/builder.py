@@ -530,21 +530,28 @@ def _build_audio_media_player(
     audio module wired up at all).
     """
     by_name = {e.name: e for e in entities}
-    # "Audio Power Convert" (1/1/240 command, 1/1/241 status) is the real
-    # Power ON/OFF function - confirmed by the user against the BAB Audio
-    # Module's own documentation, distinct from "Audio Power" (1/1/202/
-    # 1/1/203), which is Standby, a separate function. Power's own
-    # communication objects live only on the KNX Smart Touch S3 touch
-    # panel (device 1.1.4), not the Audio Module itself (1.1.5) - verified
-    # against the reference project - so build_audio_module_package's
-    # device-CO-based scoping (see there) never includes it; the
-    # media_player this function builds for that narrower package will
-    # be None as a result, same as if any other required entity were
-    # missing. "Audio Power" (Standby) is deliberately NOT referenced
-    # anywhere in this function: it stays its own independent switch,
-    # unaffected by any media_player command (turn_on/turn_off/
-    # state_template all use Power, never Standby).
-    power = by_name.get("Audio Power Convert")
+    # Power is "Audio Power" (1/1/202 command, 1/1/203 status), which the
+    # module itself calls **Standby**.
+    #
+    # This previously used "Audio Power Convert" (1/1/240/1/1/241) on the
+    # understanding that it was the real Power ON/OFF and that Standby was
+    # a separate function. The official AUDIOMODULE documentation, which
+    # the module serves at rest/config/file/manuals/, does not contain a
+    # "Power Convert" object at all; the only power object it documents is
+    # "Standby (EIS1). Switches the integrated amplifier of the
+    # AUDIOMODULE Speaker on and off. 0 Power off, 1 Power on."
+    #
+    # The bus agrees. The module (1.1.5) sends its own status on 1/1/203,
+    # so 1/1/202/203 is genuinely its object, while reads of 1/1/241 go
+    # unanswered. 1/1/240/241 is another device's logic - the KNX Smart
+    # Touch S3 panel's - confirmed by the installation's owner, so nothing
+    # here should be driving it.
+    #
+    # A side effect worth noting: because 1/1/202 *is* wired to the
+    # module's own communication objects, build_audio_module_package's
+    # device-scoped package now gets a working media_player too, where the
+    # Power Convert version always produced None.
+    power = by_name.get("Audio Power")
     play_pause = by_name.get("Audio Play/Pause")
     next_track = by_name.get("Audio Next/Prev")
     # "Audio Previous" (see _apply_audio_module_semantics) is the other

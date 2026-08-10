@@ -39,6 +39,7 @@ def package(project: ETSProject):
         background_playlist=recipe.background_playlist,
         audio_media_source=recipe.audio_media_source,
         unresponsive_addresses=recipe.unresponsive_addresses,
+        answers_read_requests=recipe.answers_read_requests,
     )
 
 
@@ -109,10 +110,17 @@ def test_album_and_artist_arrive_as_their_own_sensors(package):
 
 
 def test_addresses_nothing_answers_are_not_polled(package):
+    """Only the audio module's own addresses, which it reports on but never
+    answers a read for. Not the rest of the bus: when that was measured
+    the other devices were not physically connected, so their silence
+    said nothing about them."""
     silenced = {e.name for e in package.entities if e.config.get("sync_state") is False}
 
     assert "Audio Track name" in silenced
     assert "Audio Standby" in silenced
+    # Never measured with the device present - so never suppressed.
+    assert "Temperature" not in silenced
+    assert "DMX Stone Red" not in silenced
     # A platform that rejects the option never receives it, whatever the
     # recipe says - emitting it for a light once failed setup for the
     # entire knx integration.

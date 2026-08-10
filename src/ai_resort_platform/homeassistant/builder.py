@@ -288,6 +288,7 @@ def build_package(
     audio_equalizer: AudioEqualizerAddresses | None = None,
     audio_media_source: str | None = None,
     unresponsive_addresses: tuple[str, ...] = (),
+    answers_read_requests: bool = True,
 ) -> HomeAssistantPackage:
     """Build one HomeAssistantPackage covering every group address in `project`.
 
@@ -324,6 +325,7 @@ def build_package(
         audio_equalizer=audio_equalizer,
         audio_media_source=audio_media_source,
         unresponsive_addresses=unresponsive_addresses,
+        answers_read_requests=answers_read_requests,
     )
 
 
@@ -369,6 +371,7 @@ def _build_package(
     audio_equalizer: AudioEqualizerAddresses | None = None,
     audio_media_source: str | None = None,
     unresponsive_addresses: tuple[str, ...] = (),
+    answers_read_requests: bool = True,
 ) -> HomeAssistantPackage:
     villa_name = project.rooms[0].name if project.rooms else project.name
     slug = _slugify(villa_name)
@@ -383,7 +386,9 @@ def _build_package(
         entities.extend(_build_entities_for(slug, entity_key, name, dpts))
 
     entities = list(_apply_audio_module_semantics(tuple(entities)))
-    entities = _silence_unanswered_reads(entities, frozenset(unresponsive_addresses))
+    entities = _silence_unanswered_reads(
+        entities, frozenset(unresponsive_addresses), answers_read_requests
+    )
 
     # An explicit argument still wins, for a project that does not carry
     # the addresses; otherwise take them from the project itself.
@@ -554,7 +559,9 @@ _SYNC_STATE_DOMAINS = frozenset(
 
 
 def _silence_unanswered_reads(
-    entities: list[HaEntity], unresponsive_addresses: frozenset[str]
+    entities: list[HaEntity],
+    unresponsive_addresses: frozenset[str],
+    answers_read_requests: bool = True,
 ) -> list[HaEntity]:
     """Turn off state sync for entities nothing on the bus will answer.
 
@@ -573,8 +580,15 @@ def _silence_unanswered_reads(
     Deliberately not applied to an entity with a mix of answering and
     silent state addresses: `sync_state` would switch off the working one
     too, trading real state for a quieter log.
+
+    `answers_read_requests=False` says no device on this installation ever
+    answers, which makes every read pointless rather than ten of them.
+    That is a stronger claim and needs stronger evidence: on the villa it
+    was measured twice over - 2342 reads and not one GroupValueResponse in
+    the whole telegram log, and then ETS itself, on its own tunnel,
+    reading a group address and receiving nothing.
     """
-    if not unresponsive_addresses:
+    if answers_read_requests and not unresponsive_addresses:
         return entities
 
     silenced = []
@@ -586,11 +600,8 @@ def _silence_unanswered_reads(
             and isinstance(value, str)
             and _GA_ADDRESS.match(value)
         }
-        if (
-            entity.domain in _SYNC_STATE_DOMAINS
-            and state_addresses
-            and state_addresses <= unresponsive_addresses
-        ):
+        mute = not answers_read_requests or state_addresses <= unresponsive_addresses
+        if entity.domain in _SYNC_STATE_DOMAINS and state_addresses and mute:
             silenced.append(
                 HaEntity(
                     domain=entity.domain,

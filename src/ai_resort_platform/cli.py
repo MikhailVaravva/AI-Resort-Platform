@@ -36,7 +36,9 @@ def _describe(deployment: Deployment) -> list[str]:
     lines = [f"project:  {deployment.project_path}"]
     if deployment.audio_media_source:
         lines.append(f"media source: {deployment.audio_media_source}")
-    if deployment.unresponsive_addresses:
+    if not deployment.answers_read_requests:
+        lines.append("not polled:   every address (this bus answers no reads)")
+    elif deployment.unresponsive_addresses:
         lines.append(f"not polled:   {len(deployment.unresponsive_addresses)} addresses")
     if deployment.welcome_playlist is not None:
         lines.append(
@@ -59,6 +61,7 @@ def _build(recipe: Path, dry_run: bool) -> int:
         audio_equalizer=deployment.audio_equalizer,
         audio_media_source=deployment.audio_media_source,
         unresponsive_addresses=deployment.unresponsive_addresses,
+        answers_read_requests=deployment.answers_read_requests,
     )
 
     for line in _describe(deployment):

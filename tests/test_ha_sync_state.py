@@ -118,3 +118,36 @@ def test_a_domain_that_rejects_sync_state_is_left_alone():
     for entity in package.entities:
         if entity.domain in ("light", "switch", "cover", "number", "button"):
             assert "sync_state" not in entity.config, entity.name
+
+
+def test_a_bus_that_answers_nothing_silences_every_readable_entity():
+    """Stronger than a list of addresses, and it needed stronger evidence:
+    2342 outgoing reads with not one GroupValueResponse in the telegram
+    log, then ETS reading a group address on its own tunnel and receiving
+    nothing back."""
+    package = build_package(_project(), answers_read_requests=False)
+
+    with_state = [e for e in package.entities if any(k.endswith("state_address") for k in e.config)]
+    assert with_state
+    for entity in with_state:
+        assert entity.config["sync_state"] is False, entity.name
+
+
+def test_it_still_reaches_no_platform_that_rejects_the_option():
+    project = ETSProject(
+        name="T",
+        guid="g",
+        tool_version="6",
+        group_addresses=(
+            _ga("1/1/0", "A1 G1 on/off", 1, 1),
+            _ga("1/1/1", "A1 G1 Switch status", 1, 1),
+            _ga("1/1/2", "A1 G1 Brightness Absolut", 5, 1),
+            _ga("1/1/3", "A1 G1 Brightness status", 5, 1),
+        ),
+    )
+
+    package = build_package(project, answers_read_requests=False)
+
+    for entity in package.entities:
+        if entity.domain in ("light", "switch", "cover", "number", "button"):
+            assert "sync_state" not in entity.config, entity.name

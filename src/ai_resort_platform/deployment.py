@@ -40,6 +40,7 @@ class Deployment:
     audio_media_source: str | None = None
     audio_equalizer: AudioEqualizerAddresses | None = None
     unresponsive_addresses: tuple[str, ...] = field(default_factory=tuple)
+    answers_read_requests: bool = True
     package_output: Path | None = None
     dashboard_output: Path | None = None
 
@@ -96,6 +97,7 @@ def load_deployment(path: Path) -> Deployment:
             else None
         ),
         unresponsive_addresses=tuple(package.get("unresponsive_addresses", ())),
+        answers_read_requests=package.get("answers_read_requests", True),
         package_output=resolve(output["package"]) if "package" in output else None,
         dashboard_output=resolve(output["dashboard"]) if "dashboard" in output else None,
     )

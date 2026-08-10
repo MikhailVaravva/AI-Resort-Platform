@@ -33,19 +33,22 @@ background_playlist = 2
 # a 14-character EIS15.
 audio_media_source = "media_player.192_168_1_17"
 
-# Group addresses nothing on the bus answers a GroupValueRead for, so
-# Home Assistant is told not to ask. Measured on the running system, not
-# derived: the project marks every one of these readable and the hardware
-# disagrees. These ten belong to the BAB DMX and Audio modules, which are
-# configured through their own web interface and never programmed from
-# ETS - they send on change and respond to nothing.
+# Group addresses the audio module itself reports on but never answers a
+# read for. This is a property of the module, measured over 1475 incoming
+# telegrams and not one GroupValueResponse - it sends on change and
+# responds to no poll.
 #
-# Deliberately excluding the fourteen addresses that also time out
-# because they are marked Data Secure in ETS while their devices are not
-# running security. That silence is a real misconfiguration, and
-# suppressing the read would hide it.
+# Deliberately NOT extended to the rest of the installation. An earlier
+# version here said `answers_read_requests = false` for the whole bus,
+# on the strength of 2342 unanswered reads and a read from ETS that also
+# went unanswered. Both measurements were real and the conclusion was
+# wrong: at the time the only device physically on the bus was the audio
+# module. Everything else - the Dali gateway, the actuator, the touch
+# panel, the DMX module - was simply not connected, so of course nothing
+# answered. Whether those devices answer a read is still unmeasured, and
+# stating that they do not would quietly cost Home Assistant every state
+# it could have had after a restart.
 unresponsive_addresses = [
-  "1/1/100", "1/1/102", "1/1/104", "1/1/106", "1/1/170",
   "1/1/203", "1/1/212", "1/1/221", "1/1/223", "1/1/231",
 ]
 

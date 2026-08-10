@@ -1,0 +1,52 @@
+# Villa A1 - what is actually deployed on the installation.
+#
+# Every option here changes the generated output, and every one of them
+# was learned from the running system rather than derived from the ETS
+# project. Regenerating without them produces a package that looks fine
+# and has quietly lost the media source, the check-in automation and the
+# read suppression - so they live here instead of in someone's shell
+# history.
+#
+#   ai-resort-platform build deployments/villa_a1.toml
+
+[project]
+# The installation's own ETS project. Not the repository's reference
+# project: that one is a different, older project (Hot Stone VILLA) and
+# does not contain the audio module's equalizer or source addresses.
+path = "/mnt/h/55555/A1 ai TEST_NEW3.knxproj"
+# Read at build time from the environment. Deliberately not a value: this
+# file is in version control and the password is not.
+password_env = "VILLA_A1_KNXPROJ_PASSWORD"
+
+[package]
+# Playlist indices for check-in: the welcome playlist, then the
+# background one after the delay. Raw indices because nothing in ETS maps
+# a playlist name to a number - see _build_welcome_automation.
+welcome_playlist = 1
+background_playlist = 2
+
+# The Logitech Media Server running on the audio module itself, reached
+# through Home Assistant's squeezebox integration. Supplies artwork,
+# artist and album, which KNX cannot carry at all - its longest string is
+# a 14-character EIS15.
+audio_media_source = "media_player.192_168_1_17"
+
+# Group addresses nothing on the bus answers a GroupValueRead for, so
+# Home Assistant is told not to ask. Measured on the running system, not
+# derived: the project marks every one of these readable and the hardware
+# disagrees. These ten belong to the BAB DMX and Audio modules, which are
+# configured through their own web interface and never programmed from
+# ETS - they send on change and respond to nothing.
+#
+# Deliberately excluding the fourteen addresses that also time out
+# because they are marked Data Secure in ETS while their devices are not
+# running security. That silence is a real misconfiguration, and
+# suppressing the read would hide it.
+unresponsive_addresses = [
+  "1/1/100", "1/1/102", "1/1/104", "1/1/106", "1/1/170",
+  "1/1/203", "1/1/212", "1/1/221", "1/1/223", "1/1/231",
+]
+
+[output]
+package = "../homeassistant/packages/villa_a1.yaml"
+dashboard = "../homeassistant/villa_a1_dashboard.yaml"

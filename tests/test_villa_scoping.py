@@ -113,3 +113,36 @@ def test_every_sensor_type_is_one_the_knx_platform_accepts(resort: ETSProject):
             declared = entity.config.get("type")
             if declared is not None:
                 assert declared in accepted, f"{room.name} / {entity.name}: {declared!r}"
+
+
+def test_black_out_is_one_control_over_every_dmx_fixture(resort: ETSProject):
+    """Blacking out the DMX is one thing to a resident, even where the
+    project spells it per fixture - A1 has a Black Out for Stone and
+    another for Terrace."""
+    package = build_package(resort, villa="Villa A1")
+
+    black_outs = [e for e in package.entities if "Black Out" in e.name]
+    (control,) = black_outs
+    assert control.domain == "switch"
+    assert control.name == "DMX Black Out"
+    assert control.config["address"] == ["1/1/109", "1/1/110"]
+
+
+def test_an_address_with_no_datapoint_type_yields_nothing(resort: ETSProject):
+    """A2 and C2 each have a "DMX Active Black Out", and neither carries a
+    DPT in the project - 1/2/114 and 3/2/89 are both None.
+
+    Without one there is nothing to classify the address as, so no entity
+    is built. That is a gap in the ETS project rather than in the
+    generator, and inventing a type to paper over it would put a control
+    in the house whose behaviour nobody has established.
+
+    Worth separating the two cases: A2 is a type A villa and will be
+    brought to A1's shape at commissioning, so its missing DPT is an
+    oversight. C is a different villa type whose audio module is to be
+    configured differently, so nothing about C2 should be made to match
+    A1 - the project describes four types on purpose.
+    """
+    for villa in ("Villa A2", "Villa C2"):
+        package = build_package(resort, villa=villa)
+        assert [e for e in package.entities if "Black Out" in e.name] == [], villa

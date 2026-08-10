@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
 
-# One KNX config value: an address, a flag, or a light's nested
+# One KNX config value: an address, several addresses (the platforms
+# accept a list wherever they accept one), a flag, or a light's nested
 # per-channel colour mapping.
-type HaConfigValue = str | bool | dict[str, dict[str, str]]
+type HaConfigValue = str | bool | list[str] | dict[str, dict[str, str]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,11 +15,11 @@ class HaEntity:
     plain dict rather than one dataclass per HA domain, since the KNX
     platform schema itself is just a flat set of keys per domain.
 
-    Values are mostly group addresses, but not all: the schema has
-    booleans (`sync_state`, `invert`, `respond_to_read`) and one nested
-    mapping (`individual_colors`, a light's per-channel addresses), so
-    anything walking this dict looking for addresses has to check, not
-    assume.
+    Values are mostly single group addresses, but not all: the schema has
+    booleans (`sync_state`, `invert`, `respond_to_read`), address lists
+    (one switch writing to several), and one nested mapping
+    (`individual_colors`, a light's per-channel addresses). Anything
+    walking this dict looking for addresses has to check, not assume.
     """
 
     domain: str

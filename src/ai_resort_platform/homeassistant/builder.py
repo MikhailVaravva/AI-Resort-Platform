@@ -587,6 +587,9 @@ _DMX_COLOURS = ("red", "green", "blue", "white")
 _DMX_CHANNEL_ENTITY = re.compile(
     r"^DMX\s+(?P<fixture>.+?)\s+(?:Red|Green|Blue|White)$", re.IGNORECASE
 )
+# "DMX Stone Black Out", "DMX Active Black Out" - per fixture in the
+# address list, one control in the house.
+_DMX_BLACK_OUT = re.compile(r"^DMX\s+.*Black\s*Out$", re.IGNORECASE)
 
 
 def _build_dmx_lights(
@@ -620,6 +623,31 @@ def _build_dmx_lights(
 
     lights: list[HaEntity] = []
     replaced: set[str] = set()
+
+    # Black Out kills the DMX output, and it is one thing to a resident
+    # even where the project spells it per fixture - A1 has one for Stone
+    # and one for Terrace, while A2 and C2 have a single "Active" one. The
+    # KNX switch platform takes a list of addresses, so one entity writes
+    # to all of them at once rather than leaving someone to press two.
+    #
+    # No state address: none of these carry one, so the switch reports
+    # what it last sent. Whether the module treats the value as a latch or
+    # a pulse is unverified - there is no DMX module on the bus to ask.
+    black_outs = sorted(
+        (e for e in entities if _DMX_BLACK_OUT.match(e.name) and "address" in e.config),
+        key=lambda e: e.name,
+    )
+    if black_outs:
+        addresses = [a for e in black_outs if isinstance(a := e.config["address"], str)]
+        lights.append(
+            HaEntity(
+                domain="switch",
+                unique_id=f"{slug}_dmx_black_out",
+                name="DMX Black Out",
+                config={"address": addresses} if len(addresses) > 1 else dict(black_outs[0].config),
+            )
+        )
+        replaced.update(e.name for e in black_outs)
     for fixture, found in sorted(channels.items()):
         colours: dict[str, dict[str, str]] = {}
         for colour in _DMX_COLOURS:

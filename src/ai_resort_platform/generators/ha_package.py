@@ -52,6 +52,13 @@ class HaMediaPlayer:
     together deciding between off/idle/playing) - `universal` evaluates
     it itself, so it replaces `attributes["state"]` rather than
     complementing it.
+
+    `children` are media_player entity_ids the `universal` platform falls
+    back to for any command it has no entry for in `commands`, and for any
+    attribute not listed in `attributes`. That fallback is the point: a
+    child that already speaks the media protocol properly supplies artwork,
+    artist and album - things a KNX bus cannot carry at all - while the
+    KNX-backed commands here keep control of the physical amplifier.
     """
 
     unique_id: str
@@ -59,6 +66,7 @@ class HaMediaPlayer:
     commands: dict[str, dict[str, object]] = field(default_factory=dict)
     attributes: dict[str, str] = field(default_factory=dict)
     state_template: str | None = None
+    children: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)

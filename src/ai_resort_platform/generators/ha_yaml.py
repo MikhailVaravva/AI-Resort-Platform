@@ -111,9 +111,11 @@ def _media_player_dict(media_player: HaMediaPlayer) -> dict[str, Any]:
         "platform": "universal",
         "name": media_player.name,
         "unique_id": media_player.unique_id,
-        "commands": media_player.commands,
-        "attributes": media_player.attributes,
     }
+    if media_player.children:
+        data["children"] = list(media_player.children)
+    data["commands"] = media_player.commands
+    data["attributes"] = media_player.attributes
     if media_player.state_template:
         data["state_template"] = media_player.state_template
     return data

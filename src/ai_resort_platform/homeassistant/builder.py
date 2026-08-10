@@ -278,6 +278,7 @@ def build_package(
     welcome_volume_percent: float = 50,
     welcome_to_background_delay: str = "00:05:00",
     audio_equalizer: AudioEqualizerAddresses | None = None,
+    audio_media_source: str | None = None,
 ) -> HomeAssistantPackage:
     """Build one HomeAssistantPackage covering every group address in `project`.
 
@@ -290,6 +291,15 @@ def build_package(
     check-in automation (see _build_welcome_automation) - omitted by
     default since there is nothing in ETSProject to derive them from; the
     automation is simply not built without both.
+
+    `audio_media_source` is the entity_id of a media_player that already
+    speaks the audio module's own protocol - the reference installation
+    runs a Logitech Media Server on the module itself, reachable through
+    Home Assistant's `squeezebox` integration. Supplying it makes that
+    player a child of the generated one, so artwork, artist and album come
+    from the source while power, volume and mute stay on KNX. Like
+    `audio_equalizer`, it has to be passed in: an LMS entity_id is not
+    something an ETS project knows about.
     """
     return _build_package(
         project,
@@ -299,6 +309,7 @@ def build_package(
         welcome_volume_percent=welcome_volume_percent,
         welcome_to_background_delay=welcome_to_background_delay,
         audio_equalizer=audio_equalizer,
+        audio_media_source=audio_media_source,
     )
 
 
@@ -342,6 +353,7 @@ def _build_package(
     welcome_volume_percent: float = 50,
     welcome_to_background_delay: str = "00:05:00",
     audio_equalizer: AudioEqualizerAddresses | None = None,
+    audio_media_source: str | None = None,
 ) -> HomeAssistantPackage:
     villa_name = project.rooms[0].name if project.rooms else project.name
     slug = _slugify(villa_name)
@@ -356,7 +368,7 @@ def _build_package(
         entities.extend(_build_entities_for(slug, entity_key, name, dpts))
 
     entities = list(_apply_audio_module_semantics(tuple(entities)))
-    media_player = _build_audio_media_player(slug, villa_name, tuple(entities))
+    media_player = _build_audio_media_player(slug, villa_name, tuple(entities), audio_media_source)
     volume_level_sensor = _build_volume_level_sensor(slug, villa_name, tuple(entities))
     welcome_automation = _build_welcome_automation(
         slug,
@@ -520,7 +532,10 @@ def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEnt
 
 
 def _build_audio_media_player(
-    slug: str, villa_name: str, entities: tuple[HaEntity, ...]
+    slug: str,
+    villa_name: str,
+    entities: tuple[HaEntity, ...],
+    media_source: str | None = None,
 ) -> HaMediaPlayer | None:
     """One `media_player` for the BAB Audio Module, composed entirely from
     entities `_build_package` already built for it (matched by `name`) -
@@ -581,24 +596,28 @@ def _build_audio_media_player(
             call["data"] = data
         return call
 
+    # Power, volume and mute always go over KNX: they act on the physical
+    # amplifier, which no media source can reach.
     commands: dict[str, dict[str, object]] = {
         "turn_on": service("switch.turn_on", power),
         "turn_off": service("switch.turn_off", power),
-        "media_play": service("switch.turn_on", play_pause),
-        "media_pause": service("switch.turn_off", play_pause),
+        "volume_mute": service("switch.toggle", mute),
+    }
+    if media_source is None:
+        # Without a child, transport has to be driven over KNX too.
+        commands["media_play"] = service("switch.turn_on", play_pause)
+        commands["media_pause"] = service("switch.turn_off", play_pause)
         # DPST-1-7 "step" (see _TRIGGER_DPTS): a momentary pulse, not a
         # persistent state - modeled as `button` entities, pressed via
         # the core button.press service. Per the official BAB
         # AUDIOMODULE V3 documentation ("Media Server - Title +/-",
         # EIS1), value 1 (this button's payload) means "next".
-        "media_next_track": service("button.press", next_track),
-        "volume_mute": service("switch.toggle", mute),
-    }
-    if previous_track is not None:
-        # Same group address as media_next_track (1/1/226), payload 0 -
-        # BAB's documented "previous" value for this object, see
-        # _apply_audio_module_semantics.
-        commands["media_previous_track"] = service("button.press", previous_track)
+        commands["media_next_track"] = service("button.press", next_track)
+        if previous_track is not None:
+            # Same group address as media_next_track (1/1/226), payload 0
+            # - BAB's documented "previous" value for this object, see
+            # _apply_audio_module_semantics.
+            commands["media_previous_track"] = service("button.press", previous_track)
     # "Audio Absolut volume" is rebuilt as a `light` (see
     # _apply_audio_module_semantics) specifically so this can be a
     # real write, not just a display - light.turn_on's brightness_pct
@@ -616,7 +635,47 @@ def _build_audio_media_player(
     # known name<->index mapping in the source project, so `source` is
     # expected to be that raw numeric index as a string, not a
     # friendly playlist name.
+    #
+    # This one stays on KNX even with a child. The module's Direct
+    # Playlist Selection (1/1/239) and a media player's `source` are
+    # different concepts - the latter would be the child's own source
+    # list, not a playlist index - and the check-in automation
+    # (_build_welcome_automation) calls media_player.select_source with
+    # exactly this index, so delegating it to the child would break it.
     commands["select_source"] = service("number.set_value", playlist, {"value": "{{ source }}"})
+
+    if media_source is not None:
+        # With a child, everything not named above falls through to it:
+        # play/pause/next/previous/seek, and the metadata attributes -
+        # title, artist, album and artwork. The last three have no KNX
+        # representation at all on a 14-character EIS15 string, so this is
+        # the only way this player ever gets them.
+        #
+        # `media_title` is deliberately NOT mapped to the KNX title sensor
+        # here: doing so would override the child's own title with a
+        # 14-character truncation of it ("Tierra Azul (E" for "Tierra Azul
+        # (Encounters Remix)").
+        return HaMediaPlayer(
+            unique_id=f"{slug}_audio_module",
+            name=f"{villa_name} Audio",
+            children=(media_source,),
+            commands=commands,
+            # Off is a KNX fact (the amplifier), everything else is the
+            # source's - playing/paused/idle/buffering are states only it
+            # can distinguish.
+            state_template=(
+                f"{{% if is_state('{_entity_id(power)}', 'off') %}}\n"
+                "  off\n"
+                "{% else %}\n"
+                f"  {{{{ states('{media_source}') }}}}\n"
+                "{% endif %}"
+            ),
+            attributes={
+                "is_volume_muted": _entity_id(mute),
+                "volume_level": volume_level_entity_id,
+                "source": _entity_id(playlist),
+            },
+        )
 
     return HaMediaPlayer(
         unique_id=f"{slug}_audio_module",

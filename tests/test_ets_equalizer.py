@@ -53,3 +53,37 @@ def test_yaml_gives_every_option_an_explicit_payload():
 
 def test_a_package_without_an_equalizer_emits_no_select_key():
     assert "select" not in (yaml.safe_load(package_to_yaml(_package())).get("knx") or {})
+
+
+def test_the_equalizer_reaches_the_dashboard():
+    """A select is not an HaEntity, so build_dashboard's domain loop cannot
+    see it - without its own card the equalizer is generated and then
+    invisible, which is what happened on the live installation."""
+    from ai_resort_platform.ets.project import ETSProject
+    from ai_resort_platform.homeassistant.builder import (
+        AudioEqualizerAddresses,
+        build_dashboard,
+        build_package,
+    )
+    from tests.test_homeassistant_builder_reference_villa import REFERENCE_VILLA
+
+    project = ETSProject.open(REFERENCE_VILLA, password="12345")
+    package = build_package(
+        project, audio_equalizer=AudioEqualizerAddresses(address="1/1/200")
+    )
+
+    view = build_dashboard(package).views[0]
+    (card,) = [c for c in view.cards if c.title == "Selects"]
+
+    assert card.entities == ("select.villa_a1_audio_equalizer",)
+
+
+def test_no_selects_card_without_an_equalizer():
+    from ai_resort_platform.ets.project import ETSProject
+    from ai_resort_platform.homeassistant.builder import build_dashboard, build_package
+    from tests.test_homeassistant_builder_reference_villa import REFERENCE_VILLA
+
+    package = build_package(ETSProject.open(REFERENCE_VILLA, password="12345"))
+    view = build_dashboard(package).views[0]
+
+    assert [c for c in view.cards if c.title == "Selects"] == []

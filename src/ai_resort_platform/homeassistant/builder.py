@@ -958,6 +958,22 @@ def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
         if entity_ids:
             cards.append(DashboardCard(title=title, entities=entity_ids))
 
+    if package.selects:
+        # Selects are their own collection rather than HaEntities (see
+        # HaSelect), so the domain loop above cannot reach them and they
+        # would otherwise be generated but invisible - which is exactly
+        # what happened to the audio module's equalizer.
+        #
+        # Villa-wide view only: _build_areas assigns entities to rooms
+        # through their group address's device, and a select carries no
+        # HaEntity to trace that way.
+        cards.append(
+            DashboardCard(
+                title="Selects",
+                entities=tuple(f"select.{_slugify(s.name)}" for s in package.selects),
+            )
+        )
+
     if package.scenes:
         cards.append(
             DashboardCard(

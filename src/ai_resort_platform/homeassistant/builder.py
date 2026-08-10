@@ -642,6 +642,18 @@ def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEnt
       (verified: identical read/write/communication/transmit flags) - a
       real, writable command target, not a status readout - so it
       becomes a `number` (writable) instead of a read-only `sensor`.
+
+      Known, deliberately unfixed discrepancy: the ETS project assigns
+      this address plain DPT-5 (8-bit unsigned), which is what this
+      builder emits and what HA therefore expects - but the live
+      installation's own telegrams on 1/1/239 are 1-bit (`xknx.ga_dpt`
+      logs "DPTBinary value can't be decoded by DPTValue1ByteUnsigned").
+      This is a data error in the ETS project (either the wrong DPT is
+      assigned to this address, or the address is not actually "Playlist
+      Select" at all), not a generator bug - `ETSProject` is read
+      faithfully here, same as everywhere else. Fixing it means
+      correcting the ETS project itself (or re-identifying the address),
+      not special-casing the DPT in code - not done, on purpose.
     - "Audio Next/Prev" (1/1/226, DPST-1-7 "step") already becomes a
       `button` via the generic pipeline (see _TRIGGER_DPTS), sending the
       default payload 1 - "next", per the official BAB AUDIOMODULE V3

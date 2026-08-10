@@ -489,7 +489,46 @@ def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEnt
 
     result = []
     for entity in entities:
-        if entity.name == "Audio Next/Prev" and entity.domain == "button":
+        if entity.name == "Audio Power" and "state_address" in entity.config:
+            # 1/1/202 and 1/1/203 are NOT a same-polarity command/status
+            # pair, which is what the generic name-matching assumed. The
+            # module documents them with opposite meanings:
+            #
+            #   Standby (EIS1)            0 = Power off, 1 = Power on
+            #   Standby - Callback (EIS1) reports whether the module is
+            #                             *in standby mode* (value 1)
+            #
+            # so a running module reports 0, and pairing them made the
+            # switch read "off" while the villa was audibly playing -
+            # observed on the live installation.
+            #
+            # The KNX `switch` platform's `invert` flips command and
+            # status together, so one entity cannot express this. Split
+            # instead: the switch keeps the command and reports
+            # optimistically, and the callback becomes its own
+            # binary_sensor stating exactly what the documentation says it
+            # means. Mute (1/1/220/221) is deliberately left alone - the
+            # module documents both of its sides as 1 = muted, so the
+            # generic pairing is correct there.
+            command_only = dict(entity.config)
+            standby_address = command_only.pop("state_address")
+            result.append(
+                HaEntity(
+                    domain="switch",
+                    unique_id=entity.unique_id,
+                    name=entity.name,
+                    config=command_only,
+                )
+            )
+            result.append(
+                HaEntity(
+                    domain="binary_sensor",
+                    unique_id=f"{entity.unique_id}_standby",
+                    name="Audio Standby",
+                    config={"state_address": standby_address},
+                )
+            )
+        elif entity.name == "Audio Next/Prev" and entity.domain == "button":
             result.append(entity)
             result.append(
                 HaEntity(
@@ -576,6 +615,11 @@ def _build_audio_media_player(
     # entity existed still have a fully working media_player without it,
     # just without a previous-track command.
     previous_track = by_name.get("Audio Previous")
+    # Split out of "Audio Power" by _apply_audio_module_semantics because
+    # the callback's polarity is the opposite of the command's. `off` is
+    # therefore standby *on*, not the power switch being off - the switch
+    # has no status of its own to read.
+    standby = by_name.get("Audio Standby")
     volume = by_name.get("Audio Absolut volume")
     mute = by_name.get("Audio Mute")
     title = by_name.get("Audio Track name")
@@ -587,6 +631,12 @@ def _build_audio_media_player(
     # same deterministic name, so both agree on this entity_id without
     # either one having to be passed into the other.
     volume_level_entity_id = f"sensor.{slug}_audio_volume"
+
+    off_condition = (
+        f"is_state('{_entity_id(standby)}', 'on')"
+        if standby is not None
+        else f"is_state('{_entity_id(power)}', 'off')"
+    )
 
     def service(
         action: str, target: HaEntity, data: dict[str, object] | None = None
@@ -664,7 +714,7 @@ def _build_audio_media_player(
             # source's - playing/paused/idle/buffering are states only it
             # can distinguish.
             state_template=(
-                f"{{% if is_state('{_entity_id(power)}', 'off') %}}\n"
+                f"{{% if {off_condition} %}}\n"
                 "  off\n"
                 "{% else %}\n"
                 f"  {{{{ states('{media_source}') }}}}\n"
@@ -711,7 +761,7 @@ def _build_audio_media_player(
         # exactly a pause, which is what the underlying group address
         # (1/1/222, EIS1 play/pause) means.
         state_template=(
-            f"{{% if is_state('{_entity_id(power)}', 'off') %}}\n"
+            f"{{% if {off_condition} %}}\n"
             "  off\n"
             f"{{% elif is_state('{_entity_id(play_pause)}', 'on') %}}\n"
             "  playing\n"
@@ -816,7 +866,10 @@ def _build_welcome_automation(
     return HaAutomation(
         unique_id=f"{slug}_welcome",
         name=f"{villa_name} Welcome",
-        triggers=({"trigger": "state", "entity_id": _entity_id(guest), "to": "on"},),
+        # See the note on _build_departure_automation's trigger: without
+        # `from`, an HA restart (unavailable -> on) would start the
+        # check-in sequence on its own.
+        triggers=({"trigger": "state", "entity_id": _entity_id(guest), "from": "off", "to": "on"},),
         actions=(
             call("media_player.turn_on"),
             call("media_player.select_source", {"source": str(welcome_playlist)}),
@@ -856,7 +909,13 @@ def _build_departure_automation(
     return HaAutomation(
         unique_id=f"{slug}_departure",
         name=f"{villa_name} Departure",
-        triggers=({"trigger": "state", "entity_id": _entity_id(guest), "to": "off"},),
+        # `from` is as load-bearing as `to` here. Without it the trigger
+        # also fires on unavailable -> off, which is exactly what every
+        # Home Assistant restart produces while entities are restored -
+        # observed on the live installation, where each restart sent
+        # Standby off and silenced the villa. Only a real checkout
+        # should.
+        triggers=({"trigger": "state", "entity_id": _entity_id(guest), "from": "on", "to": "off"},),
         actions=(
             {
                 "action": "switch.turn_off",

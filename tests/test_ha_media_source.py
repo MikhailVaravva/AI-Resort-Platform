@@ -79,7 +79,10 @@ def test_state_is_the_childs_unless_the_amplifier_is_off():
     player = _player(audio_media_source=SOURCE)
     assert player.state_template is not None
 
-    assert "switch.audio_power" in player.state_template
+    # Standby, not the power switch: the switch has no readable status
+    # (its callback's polarity is inverted, see
+    # _apply_audio_module_semantics).
+    assert "binary_sensor.audio_standby" in player.state_template
     assert f"states('{SOURCE}')" in player.state_template
     # play/pause is the child's business now, not a KNX switch's.
     assert "audio_play_pause" not in player.state_template
@@ -93,3 +96,16 @@ def test_yaml_emits_children_for_the_universal_platform():
     (entry,) = yaml.safe_load(package_yaml)["media_player"]
     assert entry["platform"] == "universal"
     assert entry["children"] == [SOURCE]
+
+
+def test_occupancy_automations_ignore_restart_transitions():
+    """An HA restart takes every entity through `unavailable` on the way
+    back, so a trigger with only `to:` fires on unavailable -> off. That
+    was observed silencing the live villa on every restart."""
+    project = ETSProject.open(REFERENCE_VILLA, password="12345")
+    package = build_package(project, welcome_playlist=1, background_playlist=2)
+
+    for automation in package.automations:
+        (trigger,) = automation.triggers
+        assert trigger["from"] in ("on", "off"), automation.name
+        assert trigger["from"] != trigger["to"], automation.name

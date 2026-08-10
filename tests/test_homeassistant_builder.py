@@ -653,7 +653,11 @@ def test_welcome_automation_is_built_when_playlists_are_supplied():
     automation = package.automations[0]
     assert automation.unique_id == "hot_stone_villa_welcome"
     assert automation.name == "Hot Stone VILLA Welcome"
-    assert automation.triggers == ({"trigger": "state", "entity_id": "switch.guest", "to": "on"},)
+    # `from` guards against an HA restart's unavailable -> on transition
+    # starting check-in by itself.
+    assert automation.triggers == (
+        {"trigger": "state", "entity_id": "switch.guest", "from": "off", "to": "on"},
+    )
     assert automation.actions == (
         {
             "action": "media_player.turn_on",
@@ -742,7 +746,11 @@ def test_departure_automation_puts_audio_module_into_standby():
     automation = package.automations[0]
     assert automation.unique_id == "hot_stone_villa_departure"
     assert automation.name == "Hot Stone VILLA Departure"
-    assert automation.triggers == ({"trigger": "state", "entity_id": "switch.guest", "to": "off"},)
+    # `from` guards against an HA restart's unavailable -> off transition
+    # silencing the villa - observed happening on the live installation.
+    assert automation.triggers == (
+        {"trigger": "state", "entity_id": "switch.guest", "from": "on", "to": "off"},
+    )
     assert automation.actions == (
         {"action": "switch.turn_off", "target": {"entity_id": "switch.audio_power"}},
     )

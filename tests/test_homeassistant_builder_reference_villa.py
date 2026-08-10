@@ -42,8 +42,12 @@ def test_reference_villa_domain_distribution():
     # button is 2, not 1: "Audio Previous" is added alongside "Audio
     # Next/Prev", the other documented value (0) of the same group
     # address 1/1/226 (see _apply_audio_module_semantics).
+    # binary_sensor is the Standby callback (1/1/203), split out of
+    # "Audio Power" because its polarity is the command's opposite - see
+    # _apply_audio_module_semantics.
     assert counts == {
         "switch": 12,
+        "binary_sensor": 1,
         "light": 3,
         "sensor": 13,
         "cover": 1,
@@ -134,6 +138,7 @@ def test_reference_villa_package_yaml_round_trips_via_existing_generator():
     assert set(data.keys()) == {"knx", "script", "media_player", "template", "automation"}
     assert set(data["knx"].keys()) == {
         "switch",
+        "binary_sensor",
         "light",
         "sensor",
         "cover",
@@ -176,6 +181,7 @@ def test_reference_villa_dashboard_covers_every_domain_present():
 
     assert card_titles == {
         "Lights",
+        "Binary Sensors",
         "Sensors",
         "Switches",
         "Covers",
@@ -234,6 +240,7 @@ def test_reference_villa_audio_module_package_excludes_touch_panel_mirrors():
     by_id = {e.unique_id: e for e in package.entities}
     assert set(by_id) == {
         "villa_a1_audio_power",
+        "villa_a1_audio_power_standby",
         "villa_a1_audio_absolut_volume_percent",
         "villa_a1_audio_mute",
         "villa_a1_audio_play_pause",
@@ -245,10 +252,12 @@ def test_reference_villa_audio_module_package_excludes_touch_panel_mirrors():
         "villa_a1_audio_track_name_latin_1",
         "villa_a1_audio_playlist_select_1byte_unsigned",
     }
-    assert by_id["villa_a1_audio_power"].config == {
-        "address": "1/1/202",
-        "state_address": "1/1/203",
-    }
+    # Command only: 1/1/203 is not this switch's status but the Standby
+    # callback, whose polarity is the command's opposite, so it becomes
+    # its own binary_sensor (see _apply_audio_module_semantics).
+    assert by_id["villa_a1_audio_power"].config == {"address": "1/1/202"}
+    assert by_id["villa_a1_audio_power_standby"].domain == "binary_sensor"
+    assert by_id["villa_a1_audio_power_standby"].config == {"state_address": "1/1/203"}
     # Wired only to the touch panel in the real project, so no state_address
     # is available on the module-scoped package for these:
     assert by_id["villa_a1_audio_mute"].config == {"address": "1/1/220"}
@@ -296,7 +305,14 @@ def test_reference_villa_audio_module_package_has_a_media_player():
     data = yaml.safe_load(package_to_yaml(package))
 
     assert set(data.keys()) == {"knx", "template", "media_player"}
-    assert set(data["knx"].keys()) == {"switch", "sensor", "light", "button", "number"}
+    assert set(data["knx"].keys()) == {
+        "switch",
+        "binary_sensor",
+        "sensor",
+        "light",
+        "button",
+        "number",
+    }
 
 
 def test_reference_villa_media_player_maps_every_requested_field():
@@ -349,12 +365,14 @@ def test_reference_villa_media_player_maps_every_requested_field():
         "source": "number.audio_playlist_select",
     }
     assert "state" not in media_player.attributes
-    # Off vs paused vs playing needs both "Audio Power" (1/1/202) and
-    # "Audio Play/Pause" together - neither switch's own state alone is a
-    # valid media_player state. Quoted so the assertion can't be satisfied
-    # by "audio_power_convert", which merely starts with the same text.
-    assert "'switch.audio_power'" in media_player.state_template
-    assert "audio_power_convert" not in media_player.state_template
+    # Off vs paused vs playing needs both the Standby callback (1/1/203)
+    # and "Audio Play/Pause" together - neither alone is a valid
+    # media_player state. Off comes from the Standby binary_sensor rather
+    # than the power switch: the switch is command-only, because the
+    # callback's polarity is the command's opposite (see
+    # _apply_audio_module_semantics).
+    assert "'binary_sensor.audio_standby'" in media_player.state_template
+    assert "switch.audio_power" not in media_player.state_template
     assert "switch.audio_play_pause" in media_player.state_template
 
 
@@ -485,7 +503,9 @@ def test_reference_villa_welcome_automation():
     automation = package.automations[0]
     assert automation.unique_id == "villa_a1_welcome"
     assert automation.name == "Villa A1 Welcome"
-    assert automation.triggers == ({"trigger": "state", "entity_id": "switch.guest", "to": "on"},)
+    assert automation.triggers == (
+        {"trigger": "state", "entity_id": "switch.guest", "from": "off", "to": "on"},
+    )
     assert automation.actions[0] == {
         "action": "media_player.turn_on",
         "target": {"entity_id": "media_player.villa_a1_audio"},
@@ -505,7 +525,9 @@ def test_reference_villa_welcome_automation():
     departure = package.automations[1]
     assert departure.unique_id == "villa_a1_departure"
     assert departure.name == "Villa A1 Departure"
-    assert departure.triggers == ({"trigger": "state", "entity_id": "switch.guest", "to": "off"},)
+    assert departure.triggers == (
+        {"trigger": "state", "entity_id": "switch.guest", "from": "on", "to": "off"},
+    )
     assert departure.actions == (
         {"action": "switch.turn_off", "target": {"entity_id": "switch.audio_power"}},
     )

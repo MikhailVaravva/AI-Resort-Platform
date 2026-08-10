@@ -6,15 +6,19 @@ class HaEntity:
     """One Home Assistant KNX-platform entity.
 
     `config` holds the KNX integration YAML keys for this domain (e.g.
-    "address", "brightness_address") mapped to group addresses - kept as a
+    "address", "brightness_address") mapped to their values - kept as a
     plain dict rather than one dataclass per HA domain, since the KNX
-    platform schema itself is just a flat set of address keys per domain.
+    platform schema itself is just a flat set of keys per domain.
+
+    Values are mostly group addresses, but not all: the schema also has
+    booleans (`sync_state`, `invert`, `respond_to_read`), so anything
+    walking this dict looking for addresses has to check, not assume.
     """
 
     domain: str
     unique_id: str
     name: str
-    config: dict[str, str] = field(default_factory=dict)
+    config: dict[str, str | bool] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

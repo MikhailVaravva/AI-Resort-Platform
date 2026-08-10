@@ -202,7 +202,10 @@ def _build_areas(
 
     for entity in entities:
         if not _is_internal(entity):
-            place(_entity_id(entity), list(entity.config.values()))
+            place(
+                _entity_id(entity),
+                [v for v in entity.config.values() if isinstance(v, str)],
+            )
     for scene in scenes:
         place(f"scene.{_slugify(scene.name)}", [scene.address])
 
@@ -279,6 +282,7 @@ def build_package(
     welcome_to_background_delay: str = "00:05:00",
     audio_equalizer: AudioEqualizerAddresses | None = None,
     audio_media_source: str | None = None,
+    unresponsive_addresses: tuple[str, ...] = (),
 ) -> HomeAssistantPackage:
     """Build one HomeAssistantPackage covering every group address in `project`.
 
@@ -291,6 +295,10 @@ def build_package(
     check-in automation (see _build_welcome_automation) - omitted by
     default since there is nothing in ETSProject to derive them from; the
     automation is simply not built without both.
+
+    `unresponsive_addresses` are group addresses nothing on the bus
+    answers a read for - see _silence_unanswered_reads for why this cannot
+    be derived from the project.
 
     `audio_media_source` is the entity_id of a media_player that already
     speaks the audio module's own protocol - the reference installation
@@ -310,6 +318,7 @@ def build_package(
         welcome_to_background_delay=welcome_to_background_delay,
         audio_equalizer=audio_equalizer,
         audio_media_source=audio_media_source,
+        unresponsive_addresses=unresponsive_addresses,
     )
 
 
@@ -354,6 +363,7 @@ def _build_package(
     welcome_to_background_delay: str = "00:05:00",
     audio_equalizer: AudioEqualizerAddresses | None = None,
     audio_media_source: str | None = None,
+    unresponsive_addresses: tuple[str, ...] = (),
 ) -> HomeAssistantPackage:
     villa_name = project.rooms[0].name if project.rooms else project.name
     slug = _slugify(villa_name)
@@ -368,6 +378,7 @@ def _build_package(
         entities.extend(_build_entities_for(slug, entity_key, name, dpts))
 
     entities = list(_apply_audio_module_semantics(tuple(entities)))
+    entities = _silence_unanswered_reads(entities, frozenset(unresponsive_addresses))
 
     # An explicit argument still wins, for a project that does not carry
     # the addresses; otherwise take them from the project itself.
@@ -521,6 +532,73 @@ def _build_equalizer_select(
     )
 
 
+# Config keys whose value is an address Home Assistant reads to
+# initialise the entity's state. `sync_state` is per entity, not per
+# address, so an entity is only silenced when every one of these it has is
+# known not to answer.
+_STATE_ADDRESS_SUFFIX = "state_address"
+
+# `sync_state` is not a universal KNX option: only these platforms accept
+# it. Verified against the integration's own schemas on a running Home
+# Assistant, after emitting it for a `light` took the whole knx
+# integration down with "Invalid config" - an invalid key is not ignored,
+# it fails setup for every KNX entity in the package.
+_SYNC_STATE_DOMAINS = frozenset(
+    {"binary_sensor", "date", "datetime", "fan", "select", "sensor", "time", "weather"}
+)
+
+
+def _silence_unanswered_reads(
+    entities: list[HaEntity], unresponsive_addresses: frozenset[str]
+) -> list[HaEntity]:
+    """Turn off state sync for entities nothing on the bus will answer.
+
+    Home Assistant sends a GroupValueRead per state address at startup and
+    logs a warning for every one that times out. Some addresses can never
+    answer - the BAB modules are configured through their own web
+    interface and never programmed from ETS, so they send on change and
+    respond to nothing.
+
+    This cannot be derived from the project, which is why it is an
+    argument. The obvious signal, the communication object's Read flag, is
+    set on every one of these addresses: the project says they are
+    readable and the hardware disagrees. Only the running installation
+    knows, so the caller states what it measured.
+
+    Deliberately not applied to an entity with a mix of answering and
+    silent state addresses: `sync_state` would switch off the working one
+    too, trading real state for a quieter log.
+    """
+    if not unresponsive_addresses:
+        return entities
+
+    silenced = []
+    for entity in entities:
+        state_addresses = {
+            value
+            for key, value in entity.config.items()
+            if key.endswith(_STATE_ADDRESS_SUFFIX)
+            and isinstance(value, str)
+            and _GA_ADDRESS.match(value)
+        }
+        if (
+            entity.domain in _SYNC_STATE_DOMAINS
+            and state_addresses
+            and state_addresses <= unresponsive_addresses
+        ):
+            silenced.append(
+                HaEntity(
+                    domain=entity.domain,
+                    unique_id=entity.unique_id,
+                    name=entity.name,
+                    config={**entity.config, "sync_state": False},
+                )
+            )
+        else:
+            silenced.append(entity)
+    return silenced
+
+
 def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEntity, ...]:
     """Two of the audio module's entities need a different domain than the
     generic classification gives them, based on their real KNX behaviour
@@ -633,7 +711,7 @@ def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEnt
                 )
             )
         elif entity.name == "Audio Absolut volume" and entity.domain == "sensor":
-            config = {
+            config: dict[str, str | bool] = {
                 "address": power.config["address"],
                 "brightness_address": entity.config["state_address"],
                 "entity_category": "config",
@@ -1234,7 +1312,7 @@ def _extract_scenes(
 
 
 def _build_cover(slug: str, cover_gas: list[GroupAddress]) -> HaEntity:
-    config: dict[str, str] = {}
+    config: dict[str, str | bool] = {}
     for ga in cover_gas:
         remainder = _strip_villa_code(ga.name)
         is_status = bool(_STATUS_SUFFIX.search(remainder))
@@ -1332,7 +1410,7 @@ def _build_entities_for(
         commands = [roles["command"] for roles in dpts.values() if "command" in roles]
         statuses = [roles["status"] for roles in dpts.values() if "status" in roles]
         if len(commands) <= 1 and len(statuses) <= 1:
-            switch_config: dict[str, str] = {}
+            switch_config: dict[str, str | bool] = {}
             if commands:
                 switch_config["address"] = commands[0].address
             if statuses:
@@ -1349,7 +1427,7 @@ def _build_date(base_id: str, name: str, roles: dict[str, GroupAddress]) -> HaEn
     bus) - per the official documentation. Falls back to using a
     status-only group address as `address` if that's the only one
     available, since the platform requires it."""
-    config: dict[str, str] = {}
+    config: dict[str, str | bool] = {}
     if "command" in roles:
         config["address"] = roles["command"].address
         if "status" in roles:
@@ -1371,8 +1449,8 @@ def _light_config(
     dpts: dict[tuple[int, int | None], dict[str, GroupAddress]],
     light_keys: set[tuple[int, int | None]],
     switch_keys: set[tuple[int, int | None]],
-) -> dict[str, str]:
-    config: dict[str, str] = {}
+) -> dict[str, str | bool]:
+    config: dict[str, str | bool] = {}
     for key in switch_keys:
         roles = dpts[key]
         if "command" in roles:

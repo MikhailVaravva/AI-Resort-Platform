@@ -85,3 +85,67 @@ def test_no_selects_card_without_an_equalizer():
     view = build_dashboard(package).views[0]
 
     assert [c for c in view.cards if c.title == "Selects"] == []
+
+
+def _project_with(*group_addresses):
+    from ai_resort_platform.ets.project import ETSProject
+
+    return ETSProject(name="T", guid="g", tool_version="6", group_addresses=group_addresses)
+
+
+def _ga(address, name, main, sub):
+    from ai_resort_platform.ets.group_addresses import GroupAddress
+
+    return GroupAddress(id=address, address=address, name=name, dpt_main=main, dpt_sub=sub)
+
+
+EQ_COMMAND = _ga("1/1/200", "A1 Audio Equalizer", 5, None)
+EQ_STATUS = _ga("1/1/201", "A1 Audio Equalizer status", 5, None)
+
+
+def test_the_equalizer_is_taken_from_the_project_when_it_carries_it():
+    """No explicit argument needed once ETS has the addresses - that
+    parameter existed to make the gap visible, not to keep it."""
+    from ai_resort_platform.homeassistant.builder import build_package
+
+    package = build_package(_project_with(EQ_COMMAND, EQ_STATUS))
+
+    (select,) = package.selects
+    assert select.address == "1/1/200"
+    assert select.state_address == "1/1/201"
+    assert select.options == AUDIO_EQUALIZER_PRESETS
+
+
+def test_the_generic_sensor_for_those_addresses_is_removed():
+    """Left alone the pipeline makes the pair a read-only
+    1byte_unsigned sensor on 1/1/201 and drops the command address
+    entirely - both wrong and a duplicate of the select."""
+    from ai_resort_platform.homeassistant.builder import build_package
+
+    package = build_package(_project_with(EQ_COMMAND, EQ_STATUS))
+
+    assert [e.name for e in package.entities] == []
+
+
+def test_an_explicit_argument_still_wins_over_the_project():
+    from ai_resort_platform.homeassistant.builder import (
+        AudioEqualizerAddresses,
+        build_package,
+    )
+
+    package = build_package(
+        _project_with(EQ_COMMAND, EQ_STATUS),
+        audio_equalizer=AudioEqualizerAddresses(address="2/1/1", state_address="2/1/2"),
+    )
+
+    (select,) = package.selects
+    assert select.address == "2/1/1"
+
+
+def test_a_command_without_a_status_still_builds_a_select():
+    from ai_resort_platform.homeassistant.builder import build_package
+
+    (select,) = build_package(_project_with(EQ_COMMAND)).selects
+
+    assert select.address == "1/1/200"
+    assert select.state_address is None

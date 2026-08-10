@@ -368,6 +368,19 @@ def _build_package(
         entities.extend(_build_entities_for(slug, entity_key, name, dpts))
 
     entities = list(_apply_audio_module_semantics(tuple(entities)))
+
+    # An explicit argument still wins, for a project that does not carry
+    # the addresses; otherwise take them from the project itself.
+    selects = _build_equalizer_select(
+        slug, villa_name, audio_equalizer or _equalizer_from_project(group_addresses)
+    )
+    if selects:
+        # Drop the generic classification of the same addresses. On its
+        # own the pipeline makes the pair a read-only 1byte_unsigned
+        # sensor on the status address and discards the command address
+        # entirely, which is both wrong and a duplicate of the select.
+        entities = [e for e in entities if e.name not in (_EQUALIZER_NAME, _EQUALIZER_STATUS_NAME)]
+
     media_player = _build_audio_media_player(slug, villa_name, tuple(entities), audio_media_source)
     volume_level_sensor = _build_volume_level_sensor(slug, villa_name, tuple(entities))
     welcome_automation = _build_welcome_automation(
@@ -381,7 +394,6 @@ def _build_package(
         background_delay=welcome_to_background_delay,
     )
     departure_automation = _build_departure_automation(slug, villa_name, tuple(entities))
-    selects = _build_equalizer_select(slug, villa_name, audio_equalizer)
     areas = _build_areas(project, group_addresses, tuple(entities), scenes)
 
     return HomeAssistantPackage(
@@ -395,6 +407,33 @@ def _build_package(
         template_sensors=(volume_level_sensor,) if volume_level_sensor else (),
         automations=tuple(a for a in (welcome_automation, departure_automation) if a is not None),
         areas=areas,
+    )
+
+
+# The equalizer's own name in the project, after _strip_villa_code.
+_EQUALIZER_NAME = "Audio Equalizer"
+_EQUALIZER_STATUS_NAME = "Audio Equalizer status"
+
+
+def _equalizer_from_project(
+    group_addresses: tuple[GroupAddress, ...],
+) -> AudioEqualizerAddresses | None:
+    """The equalizer addresses, if the project itself carries them.
+
+    It did not when this was first built - 1/1/200 and 1/1/201 were
+    configured in the module and missing from ETS, so a caller had to pass
+    them in (see AudioEqualizerAddresses). Now that they can be in the
+    project, prefer that: the whole point of the explicit parameter was to
+    make the gap visible, not to keep it.
+    """
+    by_name = {_strip_villa_code(ga.name): ga for ga in group_addresses}
+    command = by_name.get(_EQUALIZER_NAME)
+    if command is None:
+        return None
+    status = by_name.get(_EQUALIZER_STATUS_NAME)
+    return AudioEqualizerAddresses(
+        address=command.address,
+        state_address=status.address if status is not None else None,
     )
 
 

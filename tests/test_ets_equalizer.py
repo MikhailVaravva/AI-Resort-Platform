@@ -149,3 +149,30 @@ def test_a_command_without_a_status_still_builds_a_select():
 
     assert select.address == "1/1/200"
     assert select.state_address is None
+
+
+def test_controls_come_before_readings_on_the_dashboard():
+    """Card order decides whether a control can be found at all.
+
+    The equalizer was originally card nine, behind a twenty-row Sensors
+    list, which put it a screen and a half down the page - generated,
+    deployed, and in practice unfindable.
+    """
+    from ai_resort_platform.ets.project import ETSProject
+    from ai_resort_platform.homeassistant.builder import (
+        AudioEqualizerAddresses,
+        build_dashboard,
+        build_package,
+    )
+    from tests.test_homeassistant_builder_reference_villa import REFERENCE_VILLA
+
+    project = ETSProject.open(REFERENCE_VILLA, password="12345")
+    package = build_package(project, audio_equalizer=AudioEqualizerAddresses(address="1/1/200"))
+
+    titles = [c.title for c in build_dashboard(package).views[0].cards]
+
+    assert titles.index("Selects") < titles.index("Sensors")
+    assert titles.index("Villa A1 Audio") < titles.index("Sensors")
+    # The media player is what the villa is currently doing - first.
+    assert titles[0] == "Villa A1 Audio"
+    assert titles[1] == "Selects"

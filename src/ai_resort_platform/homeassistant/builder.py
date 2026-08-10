@@ -108,15 +108,20 @@ _DPT_LABELS: dict[tuple[int, int | None], str] = {
     (16, 1): "latin_1",
 }
 
+# Ordered so the things a resident acts on come before the things they
+# only read. The first version listed domains alphabetically-ish and put
+# the twenty-row Sensors card ahead of the controls, which buried the
+# audio module's equalizer a screen and a half down the page - it was
+# generated, deployed and effectively unfindable.
 _DASHBOARD_SECTIONS = (
     ("light", "Lights"),
     ("cover", "Covers"),
     ("switch", "Switches"),
+    ("number", "Numbers"),
+    ("button", "Buttons"),
     ("binary_sensor", "Binary Sensors"),
     ("sensor", "Sensors"),
     ("date", "Dates"),
-    ("number", "Numbers"),
-    ("button", "Buttons"),
 )
 
 
@@ -1175,12 +1180,18 @@ def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
     filtering here.
     """
     cards = []
-    for domain, title in _DASHBOARD_SECTIONS:
-        entity_ids = tuple(
-            _entity_id(e) for e in package.entities if e.domain == domain and not _is_internal(e)
+    for media_player in package.media_players:
+        # First: it is the one card that shows what the villa is currently
+        # doing, and the documented Lovelace card for a media_player
+        # entity (home-assistant.io) - a single-entity card, not the
+        # generic "entities" list the sections below use.
+        cards.append(
+            DashboardCard(
+                title=media_player.name,
+                card_type="media-control",
+                entity=_media_player_entity_id(media_player),
+            )
         )
-        if entity_ids:
-            cards.append(DashboardCard(title=title, entities=entity_ids))
 
     if package.selects:
         # Selects are their own collection rather than HaEntities (see
@@ -1198,6 +1209,13 @@ def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
             )
         )
 
+    for domain, title in _DASHBOARD_SECTIONS:
+        entity_ids = tuple(
+            _entity_id(e) for e in package.entities if e.domain == domain and not _is_internal(e)
+        )
+        if entity_ids:
+            cards.append(DashboardCard(title=title, entities=entity_ids))
+
     if package.scenes:
         cards.append(
             DashboardCard(
@@ -1209,17 +1227,6 @@ def build_dashboard(package: HomeAssistantPackage) -> Dashboard:
         cards.append(
             DashboardCard(
                 title="Scripts", entities=tuple(f"script.{s.unique_id}" for s in package.scripts)
-            )
-        )
-    for media_player in package.media_players:
-        # The documented Lovelace card for a media_player entity
-        # (home-assistant.io) - a single-entity card, not the generic
-        # "entities" list card the sections above use.
-        cards.append(
-            DashboardCard(
-                title=media_player.name,
-                card_type="media-control",
-                entity=_media_player_entity_id(media_player),
             )
         )
 

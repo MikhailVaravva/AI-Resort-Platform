@@ -68,9 +68,7 @@ def test_the_equalizer_reaches_the_dashboard():
     from tests.test_homeassistant_builder_reference_villa import REFERENCE_VILLA
 
     project = ETSProject.open(REFERENCE_VILLA, password="12345")
-    package = build_package(
-        project, audio_equalizer=AudioEqualizerAddresses(address="1/1/200")
-    )
+    package = build_package(project, audio_equalizer=AudioEqualizerAddresses(address="1/1/200"))
 
     view = build_dashboard(package).views[0]
     (card,) = [c for c in view.cards if c.title == "Selects"]

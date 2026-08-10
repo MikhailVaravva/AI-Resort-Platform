@@ -10,10 +10,12 @@
 #   ai-resort-platform build deployments/villa_a1.toml
 
 [project]
-# The installation's own ETS project. Not the repository's reference
-# project: that one is a different, older project (Hot Stone VILLA) and
-# does not contain the audio module's equalizer or source addresses.
-path = "/mnt/h/55555/A1 ai TEST_NEW3.knxproj"
+# The installation's own ETS project, now in the repository so a checkout
+# can build the villa without the machine it was exported on. Not the
+# reference project under examples/Reference-Villa: that is a different,
+# older one (Hot Stone VILLA) without the audio module's equalizer or
+# source addresses.
+path = "../examples/Villa-A1/villa_a1.knxproj"
 # Read at build time from the environment. Deliberately not a value: this
 # file is in version control and the password is not.
 password_env = "VILLA_A1_KNXPROJ_PASSWORD"

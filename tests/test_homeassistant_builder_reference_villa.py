@@ -45,11 +45,14 @@ def test_reference_villa_domain_distribution():
     # binary_sensor is the Standby callback (1/1/203), split out of
     # "Audio Power" because its polarity is the command's opposite - see
     # _apply_audio_module_semantics.
+    # light is 5 and switch 10 because the two DMX fixtures - Stone and
+    # Terrace - are now one light each, absorbing their on/off switch and
+    # their four colour channels (see _build_dmx_lights).
     assert counts == {
-        "switch": 12,
+        "switch": 10,
         "binary_sensor": 1,
-        "light": 3,
-        "sensor": 13,
+        "light": 5,
+        "sensor": 5,
         "cover": 1,
         "date": 1,
         "button": 2,
@@ -82,7 +85,9 @@ def test_reference_villa_scene_control_is_not_a_generic_entity():
     `address`, never as its own switch/sensor entity."""
     package = _build()
 
-    addresses_in_entities = {v for e in package.entities for v in e.config.values()}
+    addresses_in_entities = {
+        v for e in package.entities for v in e.config.values() if isinstance(v, str)
+    }
     assert "1/1/150" not in addresses_in_entities
 
 
@@ -147,7 +152,9 @@ def test_reference_villa_package_yaml_round_trips_via_existing_generator():
         "button",
         "number",
     }
-    assert len(data["knx"]["light"]) == 3
+    # 5: the two dimmable room lights, the audio volume, and one per
+    # DMX fixture (Stone, Terrace) - see _build_dmx_lights.
+    assert len(data["knx"]["light"]) == 5
     assert len(data["knx"]["scene"]) == 6
     assert len(data["script"]) == 6
     assert len(data["media_player"]) == 1

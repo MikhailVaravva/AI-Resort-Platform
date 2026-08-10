@@ -25,6 +25,7 @@ from ai_resort_platform.generators.ha_package import (
     DashboardCard,
     DashboardView,
     HaAutomation,
+    HaConfigValue,
     HaEntity,
     HaMediaPlayer,
     HaScene,
@@ -441,6 +442,10 @@ def _build_package(
         entities.extend(_build_entities_for(slug, entity_key, name, dpts))
 
     entities = list(_apply_audio_module_semantics(tuple(entities)))
+
+    dmx_lights, replaced_by_dmx = _build_dmx_lights(slug, tuple(entities), group_addresses)
+    if dmx_lights:
+        entities = [e for e in entities if e.name not in replaced_by_dmx] + dmx_lights
     entities = _silence_unanswered_reads(
         entities, frozenset(unresponsive_addresses), answers_read_requests
     )
@@ -566,6 +571,94 @@ def _build_source_select(
             payload_length=0,
         ),
     )
+
+
+# "A1 DMX Terrace Red value" / "... status": one channel of a DMX
+# fixture. The fixture name is whatever sits between "DMX" and the
+# colour, so Stone and Terrace fall out without being named here.
+_DMX_CHANNEL = re.compile(
+    r"^DMX\s+(?P<fixture>.+?)\s+(?P<colour>Red|Green|Blue|White)\s+(?P<role>value|status)$",
+    re.IGNORECASE,
+)
+_DMX_COLOURS = ("red", "green", "blue", "white")
+# The same channel as an already-built entity: the generic pipeline pairs
+# "... value" with "... status" and strips both suffixes, so the entity is
+# named "DMX Stone Red" with no role left on it.
+_DMX_CHANNEL_ENTITY = re.compile(
+    r"^DMX\s+(?P<fixture>.+?)\s+(?:Red|Green|Blue|White)$", re.IGNORECASE
+)
+
+
+def _build_dmx_lights(
+    slug: str, entities: tuple[HaEntity, ...], group_addresses: tuple[GroupAddress, ...]
+) -> tuple[list[HaEntity], set[str]]:
+    """Turn a DMX fixture's per-colour channels into one `light`.
+
+    Each channel is a DPT 5.001 level, so the generic pipeline makes four
+    read-only sensors per fixture and the decorative lighting cannot be
+    controlled at all. The KNX light platform has `individual_colors` for
+    exactly this shape: one entity, four brightness addresses, real colour
+    control from Home Assistant.
+
+    `individual_colors` and `color_address` are mutually exclusive - the
+    schema rejects a light carrying both. The per-channel form wins
+    because it is the one this project can actually feed: it has four
+    channels with status addresses, while the combined 232.600 address
+    (e.g. 1/1/108) has no status at all, and RGBW needs a fourth channel
+    that an RGB address cannot carry.
+
+    Returns the lights and the names of the entities they replace.
+    """
+    by_name = {e.name: e for e in entities}
+    channels: dict[str, dict[tuple[str, str], str]] = {}
+    for ga in group_addresses:
+        matched = _DMX_CHANNEL.match(_strip_villa_code(ga.name or ""))
+        if matched is not None:
+            fixture = matched["fixture"]
+            key = (matched["colour"].lower(), matched["role"].lower())
+            channels.setdefault(fixture, {})[key] = ga.address
+
+    lights: list[HaEntity] = []
+    replaced: set[str] = set()
+    for fixture, found in sorted(channels.items()):
+        colours: dict[str, dict[str, str]] = {}
+        for colour in _DMX_COLOURS:
+            command = found.get((colour, "value"))
+            if command is None:
+                continue
+            channel = {"brightness_address": command}
+            status = found.get((colour, "status"))
+            if status:
+                channel["brightness_state_address"] = status
+            colours[colour] = channel
+        if not colours:
+            continue
+
+        config: dict[str, HaConfigValue] = {}
+        # The fixture's own on/off, named either way round in this project:
+        # "DMX Terrace On/Off" but "Stone Power".
+        switch = by_name.get(f"DMX {fixture} On/Off") or by_name.get(f"{fixture} Power")
+        if switch is not None:
+            for field_name in ("address", "state_address"):
+                value = switch.config.get(field_name)
+                if isinstance(value, str):
+                    config[field_name] = value
+            replaced.add(switch.name)
+        config["individual_colors"] = colours
+
+        lights.append(
+            HaEntity(
+                domain="light",
+                unique_id=f"{slug}_{_slugify(fixture)}_dmx",
+                name=f"DMX {fixture}",
+                config=config,
+            )
+        )
+        for name in by_name:
+            entity_channel = _DMX_CHANNEL_ENTITY.match(name)
+            if entity_channel is not None and entity_channel["fixture"] == fixture:
+                replaced.add(name)
+    return lights, replaced
 
 
 def _build_equalizer_select(
@@ -794,7 +887,7 @@ def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEnt
                 )
             )
         elif entity.name == "Audio Absolut volume" and entity.domain == "sensor":
-            config: dict[str, str | bool] = {
+            config: dict[str, HaConfigValue] = {
                 "address": power.config["address"],
                 "brightness_address": entity.config["state_address"],
                 "entity_category": "config",
@@ -1397,7 +1490,7 @@ def _extract_scenes(
 
 
 def _build_cover(slug: str, cover_gas: list[GroupAddress]) -> HaEntity:
-    config: dict[str, str | bool] = {}
+    config: dict[str, HaConfigValue] = {}
     for ga in cover_gas:
         remainder = _strip_villa_code(ga.name)
         is_status = bool(_STATUS_SUFFIX.search(remainder))
@@ -1495,7 +1588,7 @@ def _build_entities_for(
         commands = [roles["command"] for roles in dpts.values() if "command" in roles]
         statuses = [roles["status"] for roles in dpts.values() if "status" in roles]
         if len(commands) <= 1 and len(statuses) <= 1:
-            switch_config: dict[str, str | bool] = {}
+            switch_config: dict[str, HaConfigValue] = {}
             if commands:
                 switch_config["address"] = commands[0].address
             if statuses:
@@ -1512,7 +1605,7 @@ def _build_date(base_id: str, name: str, roles: dict[str, GroupAddress]) -> HaEn
     bus) - per the official documentation. Falls back to using a
     status-only group address as `address` if that's the only one
     available, since the platform requires it."""
-    config: dict[str, str | bool] = {}
+    config: dict[str, HaConfigValue] = {}
     if "command" in roles:
         config["address"] = roles["command"].address
         if "status" in roles:
@@ -1534,8 +1627,8 @@ def _light_config(
     dpts: dict[tuple[int, int | None], dict[str, GroupAddress]],
     light_keys: set[tuple[int, int | None]],
     switch_keys: set[tuple[int, int | None]],
-) -> dict[str, str | bool]:
-    config: dict[str, str | bool] = {}
+) -> dict[str, HaConfigValue]:
+    config: dict[str, HaConfigValue] = {}
     for key in switch_keys:
         roles = dpts[key]
         if "command" in roles:

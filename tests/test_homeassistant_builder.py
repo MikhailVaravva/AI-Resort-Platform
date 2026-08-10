@@ -146,13 +146,18 @@ def test_command_and_status_with_mismatched_wording_still_merge():
     entity_key regardless of the DPT - here there's no DPT-1.x switch
     key, so per the KNX `light` platform's required `address` field
     (confirmed against a real Home Assistant instance), this becomes a
-    read-only `sensor` rather than an unbuildable `light`."""
+    read-only `sensor` rather than an unbuildable `light`.
+
+    Deliberately not a DMX channel: those are now collected into a single
+    light with individual_colors (see _build_dmx_lights), which would make
+    this about that instead of about the naming quirk.
+    """
     gas = (
         GroupAddress(
-            id="1", address="1/1/160", name="A1 DMX Terrace Red value", dpt_main=5, dpt_sub=1
+            id="1", address="1/1/160", name="A1 Terrace Level value", dpt_main=5, dpt_sub=1
         ),
         GroupAddress(
-            id="2", address="1/1/161", name="A1 DMX Terrace Red status", dpt_main=5, dpt_sub=1
+            id="2", address="1/1/161", name="A1 Terrace Level status", dpt_main=5, dpt_sub=1
         ),
     )
     package = build_package(_project(gas))

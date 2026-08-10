@@ -381,7 +381,21 @@ def _build_package(
         # entirely, which is both wrong and a duplicate of the select.
         entities = [e for e in entities if e.name not in (_EQUALIZER_NAME, _EQUALIZER_STATUS_NAME)]
 
-    media_player = _build_audio_media_player(slug, villa_name, tuple(entities), audio_media_source)
+    source_select = _build_source_select(slug, villa_name, group_addresses)
+    if source_select:
+        # Same reasoning: the generic pipeline already made this pair a
+        # switch, which would sit on the same addresses as the select and
+        # offer on/off in place of the input's name.
+        entities = [e for e in entities if e.name != _SOURCE_SELECT_NAME]
+    selects = selects + source_select
+
+    media_player = _build_audio_media_player(
+        slug,
+        villa_name,
+        tuple(entities),
+        audio_media_source,
+        source_select[0] if source_select else None,
+    )
     volume_level_sensor = _build_volume_level_sensor(slug, villa_name, tuple(entities))
     welcome_automation = _build_welcome_automation(
         slug,
@@ -414,6 +428,15 @@ def _build_package(
 _EQUALIZER_NAME = "Audio Equalizer"
 _EQUALIZER_STATUS_NAME = "Audio Equalizer status"
 
+_SOURCE_SELECT_NAME = "Audio Source Select"
+_SOURCE_SELECT_STATUS_NAME = "Audio Source Select status"
+
+# The module's two inputs and the EIS1 values that pick them, quoted from
+# the AUDIOMODULE documentation: "Source Select (EIS1). With this KNX group
+# address you can switch manually between the sources "Media Server" and
+# "Line-In" ... 0 for the Media Server, 1 for the Line-In input".
+AUDIO_SOURCE_OPTIONS: tuple[tuple[str, int], ...] = (("Media Server", 0), ("Line-In", 1))
+
 
 def _equalizer_from_project(
     group_addresses: tuple[GroupAddress, ...],
@@ -434,6 +457,38 @@ def _equalizer_from_project(
     return AudioEqualizerAddresses(
         address=command.address,
         state_address=status.address if status is not None else None,
+    )
+
+
+def _build_source_select(
+    slug: str, villa_name: str, group_addresses: tuple[GroupAddress, ...]
+) -> tuple[HaSelect, ...]:
+    """The module's input as a `select`, not a `switch`.
+
+    Generically the command/status pair classifies as a switch, whose
+    on/off says nothing about which input it means. A KNX select carries
+    the documented names instead, and `payload_length: 0` is the platform's
+    encoding for a 1-bit value, so this stays a single-bit EIS1 object on
+    the bus.
+
+    It also gives media_player.select_source something real to target: before
+    this existed, `source` was wired to the playlist index, which is a
+    different concept entirely.
+    """
+    by_name = {_strip_villa_code(ga.name): ga for ga in group_addresses}
+    command = by_name.get(_SOURCE_SELECT_NAME)
+    if command is None:
+        return ()
+    status = by_name.get(_SOURCE_SELECT_STATUS_NAME)
+    return (
+        HaSelect(
+            unique_id=f"{slug}_audio_source_select",
+            name=f"{villa_name} Audio Source",
+            address=command.address,
+            state_address=status.address if status is not None else None,
+            options=AUDIO_SOURCE_OPTIONS,
+            payload_length=0,
+        ),
     )
 
 
@@ -609,11 +664,38 @@ def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEnt
     return tuple(result)
 
 
+def _media_player_attributes(
+    mute: HaEntity,
+    volume_level_entity_id: str,
+    playlist: HaEntity,
+    source_entity_id: str | None,
+) -> dict[str, str]:
+    """The attributes both shapes of the player share.
+
+    `source_list` is only meaningful once `source` is a real input
+    selector: a select carries its option names in an `options` attribute,
+    which is what the media player shows in its source menu. The playlist
+    fallback has no such catalog - the project holds only a numeric index -
+    so it exposes `source` without a list, exactly as before.
+    """
+    attributes = {
+        "is_volume_muted": _entity_id(mute),
+        "volume_level": volume_level_entity_id,
+    }
+    if source_entity_id is not None:
+        attributes["source"] = source_entity_id
+        attributes["source_list"] = f"{source_entity_id}|options"
+    else:
+        attributes["source"] = _entity_id(playlist)
+    return attributes
+
+
 def _build_audio_media_player(
     slug: str,
     villa_name: str,
     entities: tuple[HaEntity, ...],
     media_source: str | None = None,
+    source_select: HaSelect | None = None,
 ) -> HaMediaPlayer | None:
     """One `media_player` for the BAB Audio Module, composed entirely from
     entities `_build_package` already built for it (matched by `name`) -
@@ -725,13 +807,23 @@ def _build_audio_media_player(
     # expected to be that raw numeric index as a string, not a
     # friendly playlist name.
     #
-    # This one stays on KNX even with a child. The module's Direct
-    # Playlist Selection (1/1/239) and a media player's `source` are
-    # different concepts - the latter would be the child's own source
-    # list, not a playlist index - and the check-in automation
-    # (_build_welcome_automation) calls media_player.select_source with
-    # exactly this index, so delegating it to the child would break it.
-    commands["select_source"] = service("number.set_value", playlist, {"value": "{{ source }}"})
+    # `source` is the module's input - Media Server or Line-In - now that
+    # the project carries 1/1/204 for it. It used to be wired to the
+    # playlist index (1/1/239), which is a different concept that merely
+    # had nowhere else to go; the check-in automation sets that index
+    # directly instead (see _build_welcome_automation).
+    #
+    # Stays on KNX even with a child, for the same reason as power and
+    # volume: this input selector is the module's own, not the source's.
+    source_entity_id = f"select.{_slugify(source_select.name)}" if source_select else None
+    if source_entity_id is not None:
+        commands["select_source"] = {
+            "action": "select.select_option",
+            "target": {"entity_id": source_entity_id},
+            "data": {"option": "{{ source }}"},
+        }
+    else:
+        commands["select_source"] = service("number.set_value", playlist, {"value": "{{ source }}"})
 
     if media_source is not None:
         # With a child, everything not named above falls through to it:
@@ -759,11 +851,9 @@ def _build_audio_media_player(
                 f"  {{{{ states('{media_source}') }}}}\n"
                 "{% endif %}"
             ),
-            attributes={
-                "is_volume_muted": _entity_id(mute),
-                "volume_level": volume_level_entity_id,
-                "source": _entity_id(playlist),
-            },
+            attributes=_media_player_attributes(
+                mute, volume_level_entity_id, playlist, source_entity_id
+            ),
         )
 
     return HaMediaPlayer(
@@ -808,20 +898,16 @@ def _build_audio_media_player(
             "  paused\n"
             "{% endif %}"
         ),
+        # KNX `light.brightness` is HA's normalized 0-255 scale (xknx
+        # converts the DPT 5.001 0-100% value for us), not the 0.0-1.0
+        # `volume_level` expects, and the `universal` platform's
+        # `attributes:` can't convert it (bare entity/attribute reference
+        # only, no templates) - so volume_level reads the 0.0-1.0 value
+        # from a small `template` sensor instead
+        # (_build_volume_level_sensor), which does support templating.
         attributes={
-            "is_volume_muted": _entity_id(mute),
-            # KNX `light.brightness` is HA's normalized 0-255 scale (xknx
-            # converts the DPT 5.001 0-100% value for us), not the 0.0-1.0
-            # `volume_level` expects, and the `universal` platform's
-            # `attributes:` can't convert it (bare entity/attribute
-            # reference only, no templates) - so this reads the 0.0-1.0
-            # value from a small `template` sensor instead
-            # (_build_volume_level_sensor), which does support templating.
-            "volume_level": volume_level_entity_id,
+            **_media_player_attributes(mute, volume_level_entity_id, playlist, source_entity_id),
             "media_title": _entity_id(title),
-            # No `source_list` for the same reason: the project has no
-            # catalog of playlist names, only this numeric index.
-            "source": _entity_id(playlist),
         },
     )
 
@@ -893,6 +979,11 @@ def _build_welcome_automation(
     guest = next((e for e in entities if e.name == "Guest" and e.domain == "switch"), None)
     if guest is None:
         return None
+    # Guaranteed present whenever media_player is: it is one of the
+    # entities _build_audio_media_player requires before building at all.
+    playlist = next((e for e in entities if e.name == "Audio Playlist Select"), None)
+    if playlist is None:
+        return None
 
     mp_entity_id = _media_player_entity_id(media_player)
 
@@ -901,6 +992,22 @@ def _build_welcome_automation(
         if data:
             step["data"] = data
         return step
+
+    def playlist_call(index: int) -> dict[str, object]:
+        """Set the module's playlist index directly.
+
+        This used to go through media_player.select_source, which was
+        wired to the playlist number only because the project had no
+        source selector to point it at. It has one now (1/1/204, Media
+        Server or Line-In), so `source` means the input, and sending a
+        playlist index through it would try to select an input named "1".
+        The playlist is its own entity and is set as such.
+        """
+        return {
+            "action": "number.set_value",
+            "target": {"entity_id": _entity_id(playlist)},
+            "data": {"value": index},
+        }
 
     return HaAutomation(
         unique_id=f"{slug}_welcome",
@@ -911,11 +1018,11 @@ def _build_welcome_automation(
         triggers=({"trigger": "state", "entity_id": _entity_id(guest), "from": "off", "to": "on"},),
         actions=(
             call("media_player.turn_on"),
-            call("media_player.select_source", {"source": str(welcome_playlist)}),
+            playlist_call(welcome_playlist),
             call("media_player.media_play"),
             call("media_player.volume_set", {"volume_level": volume_percent / 100}),
             {"delay": background_delay},
-            call("media_player.select_source", {"source": str(background_playlist)}),
+            playlist_call(background_playlist),
         ),
     )
 

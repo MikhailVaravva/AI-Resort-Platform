@@ -510,16 +510,19 @@ def test_reference_villa_welcome_automation():
         "action": "media_player.turn_on",
         "target": {"entity_id": "media_player.villa_a1_audio"},
     }
+    # The playlist is set on its own entity, not through the player's
+    # `source`: `source` is the module's input (Media Server / Line-In)
+    # wherever the project carries 1/1/204.
     assert automation.actions[1] == {
-        "action": "media_player.select_source",
-        "target": {"entity_id": "media_player.villa_a1_audio"},
-        "data": {"source": "1"},
+        "action": "number.set_value",
+        "target": {"entity_id": "number.audio_playlist_select"},
+        "data": {"value": 1},
     }
     assert automation.actions[4] == {"delay": "00:05:00"}
     assert automation.actions[5] == {
-        "action": "media_player.select_source",
-        "target": {"entity_id": "media_player.villa_a1_audio"},
-        "data": {"source": "2"},
+        "action": "number.set_value",
+        "target": {"entity_id": "number.audio_playlist_select"},
+        "data": {"value": 2},
     }
 
     departure = package.automations[1]

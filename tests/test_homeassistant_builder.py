@@ -663,10 +663,12 @@ def test_welcome_automation_is_built_when_playlists_are_supplied():
             "action": "media_player.turn_on",
             "target": {"entity_id": "media_player.hot_stone_villa_audio"},
         },
+        # The playlist index goes to its own entity, not through the
+        # player's `source` - see _build_welcome_automation.
         {
-            "action": "media_player.select_source",
-            "target": {"entity_id": "media_player.hot_stone_villa_audio"},
-            "data": {"source": "1"},
+            "action": "number.set_value",
+            "target": {"entity_id": "number.audio_playlist_select"},
+            "data": {"value": 1},
         },
         {
             "action": "media_player.media_play",
@@ -679,9 +681,9 @@ def test_welcome_automation_is_built_when_playlists_are_supplied():
         },
         {"delay": "00:05:00"},
         {
-            "action": "media_player.select_source",
-            "target": {"entity_id": "media_player.hot_stone_villa_audio"},
-            "data": {"source": "2"},
+            "action": "number.set_value",
+            "target": {"entity_id": "number.audio_playlist_select"},
+            "data": {"value": 2},
         },
     )
 

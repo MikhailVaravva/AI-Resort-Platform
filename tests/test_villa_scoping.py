@@ -82,3 +82,34 @@ def test_a_single_villa_export_still_builds_without_the_argument():
 
     assert package.villa_name == "Villa A1"
     assert package.media_players
+
+
+def test_every_sensor_type_is_one_the_knx_platform_accepts(resort: ETSProject):
+    """The KNX sensor platform takes numeric DPTs only, and rejects the
+    whole integration over one it does not know - an invalid `type` is not
+    ignored, it fails setup for every KNX entity in the package.
+
+    Building the resort project once produced six such types at once
+    ('232.600', '251.600', '3.7', '17.1', '1.1' and '-1'), two of them in
+    villa A1, from a numeric fallback that looked reasonable and was not
+    valid config.
+
+    The accepted set is checked against a running Home Assistant, not
+    guessed; this list is that answer written down.
+    """
+    accepted = {
+        "1byte_unsigned",
+        "color_temperature",
+        "humidity",
+        "latin_1",
+        "percent",
+        "pulse",
+        "scene_number",
+        "temperature",
+    }
+
+    for room in resort.rooms:
+        for entity in build_package(resort, villa=room.name).entities:
+            declared = entity.config.get("type")
+            if declared is not None:
+                assert declared in accepted, f"{room.name} / {entity.name}: {declared!r}"

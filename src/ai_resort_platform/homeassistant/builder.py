@@ -106,6 +106,7 @@ _DPT_LABELS: dict[tuple[int, int | None], str] = {
     (9, 1): "temperature",
     (9, 7): "humidity",
     (16, 1): "latin_1",
+    (17, 1): "scene_number",
 }
 
 # Ordered so the things a resident acts on come before the things they
@@ -1554,17 +1555,32 @@ def _light_config(
 def _sensor_fallback(
     base_id: str, name: str, dpts: dict[tuple[int, int | None], dict[str, GroupAddress]]
 ) -> list[HaEntity]:
-    """One sensor per remaining (dpt_main, dpt_sub) group, so nothing is
-    silently dropped. `unique_id` is always suffixed - this can run
-    alongside an already-built light entity sharing `base_id`."""
+    """One sensor per remaining (dpt_main, dpt_sub) group.
+
+    Only for DPTs with a `type` the KNX sensor platform accepts. That
+    platform takes numeric DPTs alone, so a group address carrying colour
+    (232.600), dimming control (3.7) or a plain switch cannot be a sensor
+    at any type name - and an unaccepted `type` is not ignored, it fails
+    setup for every KNX entity in the package.
+
+    This used to emit a numeric "{main}.{sub}" label for anything unknown,
+    which reads like a reasonable fallback and is invalid config. Building
+    the resort project surfaced six of them at once, two in villa A1
+    alone; deploying that would have taken the villa's KNX down exactly as
+    an invalid `sync_state` did earlier.
+
+    Dropping them loses nothing that worked: the entity could not have
+    been created either way. What it costs is silence about the address,
+    which is the trade the alternative does not offer.
+    """
     entities = []
-    multiple = len(dpts) > 1
-    for (main, sub), roles in dpts.items():
+    labelled = {k: v for k, v in dpts.items() if k in _DPT_LABELS}
+    multiple = len(labelled) > 1
+    for (main, sub), roles in labelled.items():
         ga = roles.get("status") or roles.get("command")
         if ga is None:
             continue
-        numeric_label = f"{main}.{sub}" if sub is not None else str(main)
-        dpt_label = _DPT_LABELS.get((main, sub)) or numeric_label
+        dpt_label = _DPT_LABELS[(main, sub)]
         entities.append(
             HaEntity(
                 domain="sensor",

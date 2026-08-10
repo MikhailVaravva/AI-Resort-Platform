@@ -91,18 +91,12 @@ def _entity_dict(entity: HaEntity) -> dict[str, Any]:
 
 
 def _select_dict(select: HaSelect) -> dict[str, Any]:
-    """`knx: select:` (home-assistant.io/integrations/knx/#select).
-
-    Each option carries its own explicit `payload`; the KNX platform has no
-    notion of an implicit ordering, so the index has to be written out.
-    """
+    """`knx: select:` (home-assistant.io/integrations/knx/#select)."""
     config: dict[str, Any] = {
         "name": select.name,
         "address": select.address,
         "payload_length": select.payload_length,
-        "options": [
-            {"option": option, "payload": payload} for payload, option in enumerate(select.options)
-        ],
+        "options": [{"option": option, "payload": payload} for option, payload in select.options],
     }
     if select.state_address:
         config["state_address"] = select.state_address

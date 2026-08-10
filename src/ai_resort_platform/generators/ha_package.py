@@ -130,14 +130,19 @@ class HaSelect:
     is: `options` is not a group address, and HaEntity.config is a flat
     address map by design.
 
-    `options` is ordered, and an option's index is the payload written to
-    the bus. `payload_length` is in bytes (1 for EIS14).
+    Each option carries its payload explicitly, as (name, payload). An
+    earlier version derived the payload from the option's position, which
+    was wrong for the first device that used it - the BAB Audio Module
+    numbers its equalizer profiles from 1, not 0. A device's payloads are
+    defined by that device, so they are stated rather than inferred.
+
+    `payload_length` is in bytes (1 for EIS14).
     """
 
     unique_id: str
     name: str
     address: str
-    options: tuple[str, ...]
+    options: tuple[tuple[str, int], ...]
     state_address: str | None = None
     payload_length: int = 1
 

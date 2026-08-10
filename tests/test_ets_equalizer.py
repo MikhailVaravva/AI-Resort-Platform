@@ -17,12 +17,15 @@ def _package(*selects: HaSelect) -> HomeAssistantPackage:
     return HomeAssistantPackage(villa_id="g", villa_name="Villa A1", selects=selects)
 
 
-def test_presets_are_the_modules_own_list_in_its_own_order():
-    """The payload is the index, so the order is load-bearing, not cosmetic."""
-    assert AUDIO_EQUALIZER_PRESETS[0] == "Without Optimisation"
-    assert AUDIO_EQUALIZER_PRESETS[1] == "Bass Boost"
-    assert AUDIO_EQUALIZER_PRESETS[-1] == "Mono"
-    assert len(AUDIO_EQUALIZER_PRESETS) == 10
+def test_presets_carry_the_documented_payloads_and_are_numbered_from_one():
+    """The official documentation lists the profiles as "- (1) Without
+    Optimisation" ... "- (10) Mono" and says those bracketed numbers are the
+    EIS14 values to send. Numbering from 0 would select the wrong profile
+    for every entry, and the last one would not exist at all."""
+    assert AUDIO_EQUALIZER_PRESETS[0] == ("Without Optimisation", 1)
+    assert AUDIO_EQUALIZER_PRESETS[1] == ("Bass Boost", 2)
+    assert AUDIO_EQUALIZER_PRESETS[-1] == ("Mono", 10)
+    assert [payload for _, payload in AUDIO_EQUALIZER_PRESETS] == list(range(1, 11))
 
 
 def test_yaml_gives_every_option_an_explicit_payload():
@@ -41,8 +44,9 @@ def test_yaml_gives_every_option_an_explicit_payload():
     assert entry["state_address"] == "1/1/201"
     assert entry["payload_length"] == 1
     assert entry["options"] == [
-        {"option": name, "payload": index} for index, name in enumerate(AUDIO_EQUALIZER_PRESETS)
+        {"option": name, "payload": payload} for name, payload in AUDIO_EQUALIZER_PRESETS
     ]
+    assert entry["options"][0] == {"option": "Without Optimisation", "payload": 1}
     # unique_id is not a documented KNX option, same as every other entity.
     assert "unique_id" not in entry
 

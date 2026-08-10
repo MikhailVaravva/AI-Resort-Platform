@@ -245,20 +245,28 @@ class AudioEqualizerAddresses:
     state_address: str | None = None
 
 
-# The equalizer presets exactly as the module's own Source Management page
-# lists them, in its order. EIS14 is one byte, and the payload is the
-# option's index in this list.
-AUDIO_EQUALIZER_PRESETS = (
-    "Without Optimisation",
-    "Bass Boost",
-    "Stereo Widening",
-    "Flat",
-    "Party",
-    "Pop",
-    "Rock",
-    "House",
-    "Speech",
-    "Mono",
+# The module's ten DSP profiles with the EIS14 value each one is selected
+# by, quoted from the official AUDIOMODULE documentation (Commissioning,
+# "Equalizer"), which lists them as "- (1) Without Optimisation" ... "-
+# (10) Mono" and then states: "the value of the desired audio profile has
+# to be sent to the specified KNX group address. The associated values are
+# listed in brackets".
+#
+# They are numbered from 1, not 0. This was first written as a 0-based
+# list on the assumption that an enumeration starts at zero; the
+# documentation says otherwise, which is why the payloads are now spelled
+# out per option instead of derived from position.
+AUDIO_EQUALIZER_PRESETS: tuple[tuple[str, int], ...] = (
+    ("Without Optimisation", 1),
+    ("Bass Boost", 2),
+    ("Stereo Widening", 3),
+    ("Flat", 4),
+    ("Party", 5),
+    ("Pop", 6),
+    ("Rock", 7),
+    ("House", 8),
+    ("Speech", 9),
+    ("Mono", 10),
 )
 
 

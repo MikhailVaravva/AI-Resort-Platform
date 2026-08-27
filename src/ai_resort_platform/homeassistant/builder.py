@@ -16,7 +16,8 @@ generators/ha_package.py:HaAutomation).
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Protocol
 
 from ai_resort_platform.ets.group_addresses import GroupAddress
 from ai_resort_platform.ets.project import ETSProject
@@ -51,7 +52,17 @@ _VALUE_SUFFIX = re.compile(r"\s+value$", re.IGNORECASE)
 _TRAILING_NOISE = re.compile(r"[,\s]+$")
 _GROUP_TOKEN = re.compile(r"\bG(\d+)\b", re.IGNORECASE)
 _COVER_KEYWORDS = ("curtain", "cover", "blind", "shutter")
-_SCENE_NUMBER = re.compile(r"\bscene\s+(\d+)\b", re.IGNORECASE)
+# Anchored at the start of the name (after the villa code) so that only
+# the scene control point's own status addresses match. Unanchored it
+# also swallowed Villa A4's "A4 DMX Scene 1..3" (1/4/170-172), which are
+# separate 1-bit addresses of their own, and re-issued them as scenes 1-3
+# on the scene control address - a duplicate of the real "A4 Scene 1..3"
+# that Home Assistant rejected outright ("ID 1/4/52_1 already exists").
+# The curtain a cover-named address belongs to: "Curtain", "Curtain2",
+# "Blind 3". A villa can have several, and each is its own cover entity.
+_COVER_TOKEN = re.compile(r"\b(?:" + "|".join(_COVER_KEYWORDS) + r")\s*\d*", re.IGNORECASE)
+
+_SCENE_NUMBER = re.compile(r"^scene\s+(\d+)\b", re.IGNORECASE)
 # DPST-18-1 "scene control" - the recall/store control point. Verified
 # against the reference project (see docstring in _extract_scenes).
 _SCENE_CONTROL_DPT: tuple[int, int | None] = (18, 1)
@@ -127,8 +138,34 @@ _DASHBOARD_SECTIONS = (
 )
 
 
+# Home Assistant's own slugify transliterates rather than discards, so a
+# Cyrillic name keeps its meaning in the entity_id. Dropping the letters
+# instead loses whatever distinguishes two addresses: the project has
+# both "A4 Temperature value" and "A4 Сенсор панели Temperature value",
+# which collapse to one entity_id without this and stay distinct with it
+# (HA gives the second sensor.a4_sensor_paneli_temperature_value -
+# checked against the running instance, not assumed). All 398 names in
+# the resort project round-trip identically through HA's own slugify;
+# that check is what fixed "я" -> "ia" and "ю" -> "iu" here.
+_TRANSLITERATION = str.maketrans(
+    {
+        **dict(zip("абвгдезийклмнопрстуфхыэ", "abvgdezijklmnoprstufhye", strict=True)),
+        "ё": "e",
+        "ж": "zh",
+        "ц": "c",
+        "ч": "ch",
+        "ш": "sh",
+        "щ": "sch",
+        "ъ": "",
+        "ь": "",
+        "ю": "iu",
+        "я": "ia",
+    }
+)
+
+
 def _slugify(text: str) -> str:
-    slug = _SLUG_INVALID.sub("_", text.lower()).strip("_")
+    slug = _SLUG_INVALID.sub("_", text.lower().translate(_TRANSLITERATION)).strip("_")
     return slug or "entity"
 
 
@@ -338,8 +375,21 @@ def build_package(
     unresponsive_addresses: tuple[str, ...] = (),
     answers_read_requests: bool = True,
     villa: str | None = None,
+    prefix_entities: bool = False,
 ) -> HomeAssistantPackage:
     """Build one HomeAssistantPackage from `project`.
+
+    `prefix_entities` puts the villa's name in front of every entity, for
+    a Home Assistant holding more than one villa. Names are villa-local
+    otherwise - the generator strips the "A1 " code, so twelve villas
+    produce twelve entities all called "Audio Power" and Home Assistant
+    resolves that by appending _2 .. _12 in whatever order it loaded them.
+    Measured on the resort project: 398 entities collapse to 106
+    entity_ids, 79 of them contested.
+
+    Off by default because it changes every entity_id, and a villa that is
+    already deployed has dashboards, automations and favourites pointing
+    at the old ones.
 
     `villa` names the room to build, for a project holding more than one -
     see villa_group_addresses. Without it the whole project goes into one
@@ -373,6 +423,7 @@ def build_package(
         project,
         villa_group_addresses(project, villa) if villa else project.group_addresses,
         villa_name=villa,
+        prefix_entities=prefix_entities,
         welcome_playlist=welcome_playlist,
         background_playlist=background_playlist,
         welcome_volume_percent=welcome_volume_percent,
@@ -428,6 +479,7 @@ def _build_package(
     audio_media_source: str | None = None,
     unresponsive_addresses: tuple[str, ...] = (),
     answers_read_requests: bool = True,
+    prefix_entities: bool = False,
 ) -> HomeAssistantPackage:
     villa_name = villa_name or (project.rooms[0].name if project.rooms else project.name)
     slug = _slugify(villa_name)
@@ -436,13 +488,14 @@ def _build_package(
 
     entities: list[HaEntity] = []
     if cover_source:
-        entities.append(_build_cover(slug, cover_source))
+        covers, unplaced = _build_covers(slug, cover_source)
+        entities.extend(covers)
+        remaining.extend(unplaced)
 
     for entity_key, name, dpts in _group_addresses(remaining):
         entities.extend(_build_entities_for(slug, entity_key, name, dpts))
 
     entities = list(_apply_audio_module_semantics(tuple(entities)))
-
     dmx_lights, replaced_by_dmx = _build_dmx_lights(slug, tuple(entities), group_addresses)
     if dmx_lights:
         entities = [e for e in entities if e.name not in replaced_by_dmx] + dmx_lights
@@ -468,7 +521,9 @@ def _build_package(
         # switch, which would sit on the same addresses as the select and
         # offer on/off in place of the input's name.
         entities = [e for e in entities if e.name != _SOURCE_SELECT_NAME]
-    selects = selects + source_select
+    selects = _silence_unanswered_selects(
+        selects + source_select, frozenset(unresponsive_addresses), answers_read_requests
+    )
 
     media_player = _build_audio_media_player(
         slug,
@@ -491,7 +546,7 @@ def _build_package(
     departure_automation = _build_departure_automation(slug, villa_name, tuple(entities))
     areas = _build_areas(project, group_addresses, tuple(entities), scenes)
 
-    return HomeAssistantPackage(
+    package = HomeAssistantPackage(
         villa_id=project.guid,
         villa_name=villa_name,
         entities=tuple(entities),
@@ -502,6 +557,108 @@ def _build_package(
         template_sensors=(volume_level_sensor,) if volume_level_sensor else (),
         automations=tuple(a for a in (welcome_automation, departure_automation) if a is not None),
         areas=areas,
+    )
+    return prefix_package_names(package, villa_name) if prefix_entities else package
+
+
+def _prefixed(name: str, prefix: str) -> str:
+    """`name` with `prefix` in front, unless it is already there.
+
+    A few names are built from the villa's name to begin with (the audio
+    equalizer select is "Villa A4 Audio Equalizer"), and prefixing those
+    again produced "Villa A4 Villa A4 Audio Equalizer".
+    """
+    return name if name.startswith(f"{prefix} ") else f"{prefix} {name}"
+
+
+class _Named(Protocol):
+    """Any package object with a display name - see prefix_package_names.
+
+    A read-only property rather than a plain `name: str` attribute: the
+    package's objects are frozen dataclasses, and a mutable attribute in
+    a Protocol does not match an immutable one.
+    """
+
+    @property
+    def name(self) -> str: ...
+
+
+def prefix_package_names(package: HomeAssistantPackage, prefix: str) -> HomeAssistantPackage:
+    """Return `package` with `prefix` in front of every object's name.
+
+    Applied last, on the finished package, rather than to entities as
+    they are built: the build filters entities by name partway through
+    (the equalizer pair, the DMX channels a colour light replaces), and a
+    prefix applied before those would stop them matching and leave the
+    duplicates in.
+
+    Renaming changes entity_ids, and the package refers to its own
+    entity_ids in several places - a media_player's commands and state
+    template, an automation's triggers, a template sensor's Jinja. Those
+    are rewritten here from the same old -> new map, longest id first so
+    that `switch.audio_play` cannot eat the front of
+    `switch.audio_play_pause`. A reference the map does not cover (a
+    squeezebox child, a KNX group address) is left alone.
+    """
+    renames = {
+        _entity_id(entity): _entity_id(
+            HaEntity(entity.domain, entity.unique_id, _prefixed(entity.name, prefix))
+        )
+        for entity in package.entities
+    }
+    for domain, items in (
+        ("scene", package.scenes),
+        ("select", package.selects),
+        ("script", package.scripts),
+        ("media_player", package.media_players),
+        ("sensor", package.template_sensors),
+    ):
+        for item in items:
+            renames[f"{domain}.{_slugify(item.name)}"] = (
+                f"{domain}.{_slugify(f'{prefix} {item.name}')}"
+            )
+
+    ordered = sorted(renames.items(), key=lambda pair: len(pair[0]), reverse=True)
+
+    def rewrite[T](value: T) -> T:
+        if isinstance(value, str):
+            for old, new in ordered:
+                value = value.replace(old, new)  # type: ignore[assignment]
+            return value
+        if isinstance(value, dict):
+            return {key: rewrite(item) for key, item in value.items()}  # type: ignore[return-value]
+        if isinstance(value, tuple):
+            return tuple(rewrite(item) for item in value)  # type: ignore[return-value]
+        if isinstance(value, list):
+            return [rewrite(item) for item in value]  # type: ignore[return-value]
+        return value
+
+    def renamed[T: _Named](item: T, **changes: object) -> T:
+        return replace(item, name=_prefixed(item.name, prefix), **changes)  # type: ignore[type-var]
+
+    return replace(
+        package,
+        entities=tuple(renamed(e, config=rewrite(e.config)) for e in package.entities),
+        scenes=tuple(renamed(s) for s in package.scenes),
+        selects=tuple(renamed(s) for s in package.selects),
+        scripts=tuple(renamed(s, sequence=rewrite(s.sequence)) for s in package.scripts),
+        media_players=tuple(
+            renamed(
+                m,
+                commands=rewrite(m.commands),
+                attributes=rewrite(m.attributes),
+                state_template=rewrite(m.state_template),
+            )
+            for m in package.media_players
+        ),
+        template_sensors=tuple(
+            renamed(s, state=rewrite(s.state)) for s in package.template_sensors
+        ),
+        automations=tuple(
+            renamed(a, triggers=rewrite(a.triggers), actions=rewrite(a.actions))
+            for a in package.automations
+        ),
+        areas=tuple(replace(a, entity_ids=rewrite(a.entity_ids)) for a in package.areas),
     )
 
 
@@ -789,6 +946,30 @@ def _silence_unanswered_reads(
         else:
             silenced.append(entity)
     return silenced
+
+
+def _silence_unanswered_selects(
+    selects: tuple[HaSelect, ...],
+    unresponsive_addresses: frozenset[str],
+    answers_read_requests: bool,
+) -> tuple[HaSelect, ...]:
+    """The select-shaped half of _silence_unanswered_reads.
+
+    Selects are their own dataclass rather than HaEntity, so the walk over
+    HaEntity.config never saw them and they kept polling addresses the
+    installation does not answer.
+    """
+    if answers_read_requests and not unresponsive_addresses:
+        return selects
+    return tuple(
+        (
+            replace(select, sync_state=False)
+            if select.state_address
+            and (not answers_read_requests or select.state_address in unresponsive_addresses)
+            else select
+        )
+        for select in selects
+    )
 
 
 def _apply_audio_module_semantics(entities: tuple[HaEntity, ...]) -> tuple[HaEntity, ...]:
@@ -1517,21 +1698,62 @@ def _extract_scenes(
     return tuple(scenes), tuple(scripts), remaining
 
 
-def _build_cover(slug: str, cover_gas: list[GroupAddress]) -> HaEntity:
-    config: dict[str, HaConfigValue] = {}
-    for ga in cover_gas:
-        remainder = _strip_villa_code(ga.name)
-        is_status = bool(_STATUS_SUFFIX.search(remainder))
-        if ga.dpt_main == 1 and ga.dpt_sub == 9:  # DPST-1-9 up/down
-            config["move_long_address"] = ga.address
-        elif ga.dpt_main == 1 and ga.dpt_sub == 7:  # DPST-1-7 step/stop
-            config["stop_address"] = ga.address
-        elif ga.dpt_main == 5:  # scaling: position command/status
-            config["position_state_address" if is_status else "position_address"] = ga.address
+def _build_covers(
+    slug: str, cover_gas: list[GroupAddress]
+) -> tuple[list[HaEntity], list[GroupAddress]]:
+    """One cover per curtain, plus the addresses none of them had a slot for.
 
-    name = next(kw for kw in _COVER_KEYWORDS if kw in cover_gas[0].name.lower()).capitalize()
-    unique_id = f"{slug}_{_slugify(name)}"
-    return HaEntity(domain="cover", unique_id=unique_id, name=name, config=config)
+    A villa can have more than one. Villa C2 has three - "C2 Curtain",
+    "C2 Curtain2", "C2 Curtain3", thirteen addresses - and treating them
+    as a single cover let each group overwrite the last one's slots, so
+    two curtains vanished and nine addresses with them.
+
+    Leftovers are handed back rather than dropped. A `cover` has one slot
+    per function, and Villa A4's range holds both the wired set
+    (1/4/39-42) and a legacy one (1/4/4, 1/4/5, 1/4/18) under the same
+    curtain name; two of those carry DPST-1-8, which matches no branch
+    here at all. Returned, they become entities of their own instead of
+    disappearing from the package with nothing to show it happened.
+    """
+    groups: dict[str, list[GroupAddress]] = {}
+    for ga in cover_gas:
+        matched = _COVER_TOKEN.search(_strip_villa_code(ga.name or ""))
+        key = matched.group(0).strip().title() if matched else "Curtain"
+        groups.setdefault(key, []).append(ga)
+
+    covers: list[HaEntity] = []
+    leftover: list[GroupAddress] = []
+    for name, addresses in groups.items():
+        placed = _place_cover_addresses(addresses)
+        leftover.extend(ga for ga in addresses if ga.id not in {p.id for p in placed.values()})
+        if placed:
+            covers.append(
+                HaEntity(
+                    domain="cover",
+                    unique_id=f"{slug}_{_slugify(name)}",
+                    name=name,
+                    config={slot: ga.address for slot, ga in placed.items()},
+                )
+            )
+    return covers, leftover
+
+
+def _place_cover_addresses(addresses: list[GroupAddress]) -> dict[str, GroupAddress]:
+    """One curtain's addresses mapped onto the `cover` platform's slots.
+
+    Returns what landed rather than the config itself, so the caller can
+    tell which addresses were used and hand back the rest.
+    """
+    placed: dict[str, GroupAddress] = {}
+    for ga in addresses:
+        is_status = bool(_STATUS_SUFFIX.search(_strip_villa_code(ga.name)))
+        if ga.dpt_main == 1 and ga.dpt_sub == 9:  # DPST-1-9 up/down
+            placed["move_long_address"] = ga
+        elif ga.dpt_main == 1 and ga.dpt_sub == 7:  # DPST-1-7 step/stop
+            placed["stop_address"] = ga
+        elif ga.dpt_main == 5:  # scaling: position command/status
+            placed["position_state_address" if is_status else "position_address"] = ga
+    return placed
 
 
 def _group_addresses(
@@ -1587,9 +1809,22 @@ def _build_entities_for(
     # `light` config to build, so these fall through to `_sensor_fallback`
     # instead (DPT 5.001/7.600 both have documented sensor.type values -
     # "percent"/"color_temperature" - so they're still exposed, read-only).
-    if light_keys and switch_keys:
-        used_keys = light_keys | switch_keys
-        config = _light_config(dpts, light_keys, switch_keys)
+    #
+    # A switch key in the *status* role only is not enough either: it
+    # yields `state_address` with no `address`, which HA rejects with the
+    # same message. Villa A4's G3 group is exactly that - the project has
+    # "A4 G3 Switch status" and "A4 G3 Brightness status" but no command
+    # addresses for either (1/4/4 and 1/4/5, where G6's pattern puts them,
+    # hold Curtain Move/Stop instead). One such group made Home Assistant
+    # refuse the whole knx: block, for every villa.
+    # Its own name rather than narrowing `switch_keys`: that set is used
+    # again below to merge a command and status carrying different DPT-1
+    # sub-types, and a status-only key has to stay in it for that.
+    switching_keys = {k for k in switch_keys if "command" in dpts[k]}
+
+    if light_keys and switching_keys:
+        used_keys = light_keys | switching_keys
+        config = _light_config(dpts, light_keys, switching_keys)
         entities = [HaEntity(domain="light", unique_id=base_id, name=name, config=config)]
         leftover = {k: v for k, v in dpts.items() if k not in used_keys}
         entities.extend(_sensor_fallback(base_id, name, leftover))

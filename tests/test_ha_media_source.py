@@ -13,7 +13,7 @@ from ai_resort_platform.generators.ha_yaml import package_to_yaml
 from ai_resort_platform.homeassistant.builder import build_package
 from tests.test_homeassistant_builder_reference_villa import REFERENCE_VILLA
 
-SOURCE = "media_player.192_168_1_17"
+SOURCE = "media_player.192_168_1_147"
 
 
 def _player(**kwargs: object):

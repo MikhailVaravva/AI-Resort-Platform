@@ -156,6 +156,12 @@ class HaSelect:
     defined by that device, so they are stated rather than inferred.
 
     `payload_length` is in bytes (1 for EIS14).
+
+    `sync_state` is the KNX select platform's own option, and false means
+    "never poll the state address". A select is not an HaEntity, so the
+    silencing that walks HaEntity.config never reached one: Villa A1's
+    two selects kept reading 1/1/201 and 1/1/205 into a two-second
+    timeout apiece on a bus that answers no reads.
     """
 
     unique_id: str
@@ -164,6 +170,7 @@ class HaSelect:
     options: tuple[tuple[str, int], ...]
     state_address: str | None = None
     payload_length: int = 1
+    sync_state: bool = True
 
 
 @dataclass(frozen=True, slots=True)

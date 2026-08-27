@@ -5,6 +5,7 @@ villas at once, which is why the deployment recipe had to point at a
 single-villa export instead.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ import pytest
 from ai_resort_platform.ets.project import ETSProject
 from ai_resort_platform.homeassistant.builder import (
     VillaNotFoundError,
+    _entity_id,
     build_package,
     villa_group_addresses,
 )
@@ -146,3 +148,81 @@ def test_an_address_with_no_datapoint_type_yields_nothing(resort: ETSProject):
     for villa in ("Villa A2", "Villa C2"):
         package = build_package(resort, villa=villa)
         assert [e for e in package.entities if "Black Out" in e.name] == [], villa
+
+
+def test_prefixing_makes_every_villa_entity_id_unique_across_the_resort() -> None:
+    """One Home Assistant holding the whole resort needs distinct ids.
+
+    Names are villa-local by default - the builder strips the "A1 " code -
+    so twelve villas all ask for switch.audio_power and HA resolves it by
+    appending _2 .. _12 in load order, which no dashboard can rely on.
+    Measured on this project without the prefix: 398 entities, 106
+    distinct ids.
+    """
+    project = ETSProject.open(HOT_STONE, password="12345")
+    seen: dict[str, str] = {}
+    for room in project.rooms:
+        for entity in build_package(project, villa=room.name, prefix_entities=True).entities:
+            entity_id = _entity_id(entity)
+            assert entity_id not in seen, f"{entity_id}: {seen.get(entity_id)} and {room.name}"
+            seen[entity_id] = room.name
+    assert len(seen) == 416
+
+
+def test_prefixing_rewrites_the_references_a_package_makes_to_itself() -> None:
+    """Renaming changes entity_ids, and the package points at its own.
+
+    A media_player whose commands still name switch.audio_power after the
+    switch became switch.villa_a2_audio_power is worse than not renaming
+    at all: it loads clean and does nothing.
+    """
+    project = ETSProject.open(HOT_STONE, password="12345")
+    package = build_package(project, villa="Villa A2", prefix_entities=True)
+    known = {_entity_id(entity) for entity in package.entities}
+
+    referenced = set()
+    for player in package.media_players:
+        for command in player.commands.values():
+            target = command.get("target", {})
+            assert isinstance(target, dict)
+            referenced.update(_as_ids(target.get("entity_id")))
+        referenced.update(_as_ids(player.state_template))
+
+    knx_backed = {ref for ref in referenced if ref.split(".")[0] in {"switch", "light", "select"}}
+    assert knx_backed, "expected the media player to drive KNX entities"
+    assert knx_backed <= known, f"dangling: {sorted(knx_backed - known)}"
+    assert all(ref.split(".", 1)[1].startswith("villa_a2_") for ref in knx_backed)
+
+
+def _as_ids(value: object) -> set[str]:
+    """Entity ids mentioned by a target field or a state template."""
+    if value is None:
+        return set()
+    text = " ".join(value) if isinstance(value, list) else str(value)
+    return set(re.findall(r"\b(?:switch|light|select|sensor|media_player)\.\w+", text))
+
+
+def test_a_villas_scenes_are_distinct_recalls_of_its_scene_control_point() -> None:
+    """Home Assistant drops a KNX scene whose (address, number) repeats.
+
+    Villa A4 has both "A4 Scene 1..6" - the scene control point's own
+    status addresses - and "A4 DMX Scene 1..3", which are separate 1-bit
+    addresses. Reading the second set as scenes too re-issued numbers 1-3
+    on the same control address, and HA refused them: "Platform knx does
+    not generate unique IDs. ID 1/4/52_1 already exists".
+    """
+    project = ETSProject.open(HOT_STONE, password="12345")
+    for villa in ("Villa A1", "Villa A3", "Villa A4"):
+        scenes = build_package(project, villa=villa).scenes
+        recalls = [(scene.address, scene.scene_number) for scene in scenes]
+        assert len(recalls) == len(set(recalls)), villa
+        assert len(scenes) == 6, villa
+
+
+def test_prefixing_leaves_a_name_that_already_names_its_villa_alone() -> None:
+    """The equalizer select is built as "Villa A4 Audio Equalizer"."""
+    project = ETSProject.open(HOT_STONE, password="12345")
+    package = build_package(project, villa="Villa A4", prefix_entities=True)
+    for select in package.selects:
+        assert not select.name.startswith("Villa A4 Villa A4")
+        assert select.name.startswith("Villa A4 ")

@@ -14,6 +14,7 @@ import pytest
 from ai_resort_platform.deployment import load_deployment
 from ai_resort_platform.ets.project import ETSProject
 from ai_resort_platform.homeassistant.builder import (
+    _SYNC_STATE_DOMAINS,
     AUDIO_EQUALIZER_PRESETS,
     AUDIO_SOURCE_OPTIONS,
     build_dashboard,
@@ -110,17 +111,31 @@ def test_album_and_artist_arrive_as_their_own_sensors(package):
 
 
 def test_addresses_nothing_answers_are_not_polled(package):
-    """Only the audio module's own addresses, which it reports on but never
-    answers a read for. Not the rest of the bus: when that was measured
-    the other devices were not physically connected, so their silence
-    said nothing about them."""
+    """Confirmed on 14 August, with the whole bus connected: of Villa
+    A1's 25 status addresses, exactly one (1/1/170, DMX Terrace Dimming)
+    answered a read. The recipe accepts that trade rather than special
+    case the one exception - see its own `answers_read_requests` comment
+    - so every state address the generator is able to suppress is
+    suppressed, the audio module's included but not exclusive.
+    """
     silenced = {e.name for e in package.entities if e.config.get("sync_state") is False}
 
     assert "Audio Track name" in silenced
     assert "Audio Standby" in silenced
-    # Never measured with the device present - so never suppressed.
-    assert "Temperature" not in silenced
-    assert "DMX Stone Red" not in silenced
+
+    # No longer special cases: the 14 August measurement covered the rest
+    # of the bus too, and the recipe's `answers_read_requests=False`
+    # makes no exception for them.
+    for entity in package.entities:
+        if entity.domain not in _SYNC_STATE_DOMAINS:
+            continue
+        has_state_address = any(
+            key.endswith("state_address") and isinstance(value, str)
+            for key, value in entity.config.items()
+        )
+        if has_state_address:
+            assert entity.config.get("sync_state") is False, entity.name
+
     # A platform that rejects the option never receives it, whatever the
     # recipe says - emitting it for a light once failed setup for the
     # entire knx integration.
@@ -141,7 +156,7 @@ def test_check_in_sets_the_playlist_directly(package):
 def test_the_player_composes_knx_control_with_the_media_source(package):
     (player,) = package.media_players
 
-    assert player.children == ("media_player.192_168_1_17",)
+    assert player.children == ("media_player.192_168_1_147",)
     # Physical: the amplifier, which no media source can reach.
     assert player.commands["turn_on"]["target"] == {"entity_id": "switch.audio_power"}
     assert player.commands["volume_set"]["target"] == {"entity_id": "light.audio_absolut_volume"}

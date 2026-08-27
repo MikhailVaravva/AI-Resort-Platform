@@ -100,6 +100,8 @@ def _select_dict(select: HaSelect) -> dict[str, Any]:
     }
     if select.state_address:
         config["state_address"] = select.state_address
+        if not select.sync_state:
+            config["sync_state"] = False
     return config
 
 

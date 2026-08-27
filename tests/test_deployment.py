@@ -120,10 +120,10 @@ def test_the_villa_a1_recipe_is_loadable_and_complete():
     assert d.password_env, "a protected project needs its password variable named"
     assert d.audio_media_source, "without this the player loses artwork and metadata"
     assert d.welcome_playlist is not None and d.background_playlist is not None
-    assert len(d.unresponsive_addresses) == 5, "the audio module's own silent addresses"
+    assert d.unresponsive_addresses == ()
     assert (
-        d.answers_read_requests is True
-    ), "the rest of the bus is unmeasured - the devices were not connected"
+        d.answers_read_requests is False
+    ), "measured on 14 August with the whole bus connected - see the recipe's own comment"
     assert d.package_output is not None and d.dashboard_output is not None
 
 

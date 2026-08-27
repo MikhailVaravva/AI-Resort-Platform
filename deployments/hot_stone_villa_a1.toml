@@ -15,15 +15,23 @@ villa = "Villa A1"
 [package]
 welcome_playlist = 1
 background_playlist = 2
-audio_media_source = "media_player.192_168_1_17"
+audio_media_source = "media_player.192_168_1_147"
 
-# The audio module reports these on change and answers no read - measured
-# over 1475 telegrams with not one GroupValueResponse. The rest of the bus
-# is deliberately still polled: when that was measured, the other devices
-# were not physically connected, so their silence said nothing about them.
-unresponsive_addresses = [
-  "1/1/203", "1/1/212", "1/1/221", "1/1/223", "1/1/231",
-]
+# This installation reports on change and answers no read.
+#
+# The earlier measurement could only speak for the audio module, since the
+# rest of the bus was not physically connected then. It is now. On 14
+# August, over a tunnel through the CubeVision gateway (our address
+# 1.1.209), five of Villa A1's six devices answered a point-to-point
+# address check - binary input, actuator, DALI gateway, Touch S3 and the
+# audio module - so they are present and awake. All 25 of the villa's
+# status addresses were then read, and exactly one answered: 1/1/170
+# DMX Terrace Dimming.
+#
+# Polling therefore costs about a hundred two-second timeouts on every
+# restart and buys one value. Home Assistant learns the rest when a device
+# sends it, which is what these devices do.
+answers_read_requests = false
 
 [output]
 package = "../homeassistant/packages/villa_a1.yaml"
